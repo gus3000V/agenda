@@ -131,7 +131,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
 
 // URL del servidor (público)
-const apiPublicaURL = 'http://localhost:3000/api/public';
+const apiPublicaURL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/public';
 
 // ==========================================
 // ESTADO Y REACTIVIDAD

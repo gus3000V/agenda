@@ -51,6 +51,11 @@ const handleMouseDown = (event, horario) => {
   document.addEventListener('mouseup', handleMouseUp);
 };
 
+const toLocalISOString = (date) => {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
+};
+
 const handleMouseUp = async () => {
   document.removeEventListener('mouseup', handleMouseUp);
   unbindGlobalEvents();
@@ -63,7 +68,7 @@ const handleMouseUp = async () => {
     draggingHorario.value.inicio = newDate;
     
     try {
-      await updateHorarioInicio(horarioId, newDate.toISOString());
+      await updateHorarioInicio(horarioId, toLocalISOString(newDate));
       emit('refresh-data');
     } catch (e) {
       console.error(e);
@@ -94,7 +99,7 @@ const handleGridClick = async (event, dayIndex) => {
   cleanUpDrag();
   
   try {
-    await createHorario(patientId, newDate.toISOString());
+    await createHorario(patientId, toLocalISOString(newDate));
     emit('refresh-data');
     emit('cancel-placement'); // This resets the flow on sidebar
   } catch (e) {

@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:3000/api/admin';
+const BASE_URL = import.meta.env.VITE_API_URL || 'https://agenda-sw74.onrender.com/api/admin';
 
 const getHeaders = () => ({
   'Content-Type': 'application/json',
@@ -55,9 +55,9 @@ export const updateHorarioInicio = async (id_horario, inicioDateString) => {
 };
 
 export const deleteHorario = async (id_horario) => {
-  const res = await fetch(`${BASE_URL}/horario/${id_horario}`, { 
-    method: 'DELETE', 
-    headers: getHeaders() 
+  const res = await fetch(`${BASE_URL}/horario/${id_horario}`, {
+    method: 'DELETE',
+    headers: getHeaders()
   });
   if (!res.ok) throw new Error('Error al eliminar');
   return true;
