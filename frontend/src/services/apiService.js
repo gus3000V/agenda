@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_URL || 'https://agenda-sw74.onrender.com/api/admin';
+const BASE_URL = import.meta.env.API_URL || 'https://agenda-sw74.onrender.com/api/admin';
 
 const getHeaders = () => ({
   'Content-Type': 'application/json',
