@@ -75,10 +75,26 @@ export function useDragAndDrop(days, scrollContainerRef) {
       
       const snappedY = Math.max(0, Math.round(yWithoutOffset / snapPixels) * snapPixels);
 
+      let ghostHeight = 45 * pxPerMinute;
+      if (draggingHorario.value) {
+        // Safe cross-browser date parsing, handling both Date objects and strings
+        const parseSafe = (d) => {
+          if (!d) return 0;
+          if (d instanceof Date) return d.getTime();
+          const clean = typeof d === 'string' ? d.replace(' ', 'T') : d;
+          return new Date(clean).getTime();
+        };
+        const ms = parseSafe(draggingHorario.value.final) - parseSafe(draggingHorario.value.inicio);
+        if (!isNaN(ms) && ms > 0) {
+          ghostHeight = (ms / 60000) * pxPerMinute;
+        }
+      }
+
       dragGhost.value = {
         visible: true,
         top: snappedY,
-        dayIndex: targetDayIndex
+        dayIndex: targetDayIndex,
+        height: ghostHeight
       };
       hoverLineTop.value = dragGhost.value.top;
     }

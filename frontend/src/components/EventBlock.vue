@@ -52,7 +52,7 @@ const edad = computed(() => {
        :class="{'opacity-50': horario.isDragging}"
        :style="blockStyle"
        @mousedown="emit('mousedown', $event, horario)"
-       @click.stop="emit('click', $event)">
+       @click="emit('click', $event)">
        
     <div class="absolute inset-0 p-1 overflow-hidden pointer-events-none rounded flex flex-col justify-between">
       <div>
@@ -74,13 +74,22 @@ const edad = computed(() => {
       ×
     </button>
     
-    <div v-if="showDeleteId === horario.id_horario" 
-         @mousedown.stop @click.stop
-         class="absolute top-0 -right-2 translate-x-full bg-white shadow-lg border border-red-200 rounded px-2 py-1 flex items-center gap-2 z-[60] cursor-default">
-      <span class="text-xs text-gray-700 font-medium whitespace-nowrap">¿Seguro?</span>
-      <button @mousedown.stop @click.stop="emit('confirm-delete', horario.id_horario)" class="text-xs text-white bg-red-500 hover:bg-red-600 px-2 py-0.5 rounded transition-colors cursor-pointer">
-        Eliminar
-      </button>
+    <!-- Overlay flotante para eliminar -->
+    <div v-if="showDeleteId === horario.id_horario"
+         class="absolute inset-0 z-50 bg-white/95 backdrop-blur-sm shadow-xl rounded-md border-2 border-red-300 p-2 flex flex-col items-center justify-center gap-2 animate-fade-in text-center">
+      <p class="text-xs font-semibold text-gray-800">¿Eliminar cita?</p>
+      <div class="flex gap-2">
+        <button @mousedown.stop="emit('confirm-delete', horario.id_horario)"
+                @touchstart.stop.prevent="emit('confirm-delete', horario.id_horario)"
+                class="bg-red-500 text-white px-3 py-1 rounded text-xs font-bold hover:bg-red-600 shadow-sm">
+          Sí
+        </button>
+        <button @mousedown.stop="emit('delete-click', null)"
+                @touchstart.stop.prevent="emit('delete-click', null)"
+                class="bg-gray-200 text-gray-700 px-3 py-1 rounded text-xs font-bold hover:bg-gray-300 shadow-sm">
+          No
+        </button>
+      </div>
     </div>
   </div>
 </template>
