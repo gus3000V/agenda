@@ -25,11 +25,11 @@ export const createPaciente = async (paciente) => {
   return await res.json();
 };
 
-export const createHorario = async (id_paciente, inicioDateString) => {
+export const createHorario = async (id_paciente, inicioDateString, especialidad = 'fonoaudiologia') => {
   const res = await fetch(`${BASE_URL}/horario`, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({ id_paciente, inicio: inicioDateString })
+    body: JSON.stringify({ id_paciente, inicio: inicioDateString, especialidad })
   });
   return await res.json();
 };
@@ -62,3 +62,5 @@ export const deleteHorario = async (id_horario) => {
   if (!res.ok) throw new Error('Error al eliminar');
   return true;
 };
+
+

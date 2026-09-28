@@ -2,7 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const rateLimit = require('express-rate-limit'); // [NUEVO]
+const rateLimit = require('express-rate-limit');
+const PDFDocument = require('pdfkit');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -69,7 +71,7 @@ app.get('/api/admin/horarios', authMiddleware, async (req, res) => {
       SELECT h.id_horario, 
              to_char(h.inicio, 'YYYY-MM-DD"T"HH24:MI:SS') as inicio, 
              to_char(h.final, 'YYYY-MM-DD"T"HH24:MI:SS') as final, 
-             h.estado,
+             h.estado, h.especialidad,
              p.id_paciente, p.nombre, p.f_nacimiento, p.nombre_tutor, p.telefono
       FROM horario h
       JOIN paciente p ON h.id_paciente = p.id_paciente
@@ -86,7 +88,7 @@ app.get('/api/admin/horarios', authMiddleware, async (req, res) => {
 app.post('/api/admin/paciente-y-cita', authMiddleware, async (req, res) => {
   const client = await pool.connect();
   try {
-    const { nombre, f_nacimiento, nombre_tutor, telefono, inicio, final } = req.body;
+    const { nombre, f_nacimiento, nombre_tutor, telefono, inicio, final, especialidad } = req.body;
     if (!nombre || !f_nacimiento || !inicio || !final) {
       return res.status(400).json({ error: 'Faltan campos obligatorios para registrar la cita.' });
     }
@@ -109,11 +111,11 @@ app.post('/api/admin/paciente-y-cita', authMiddleware, async (req, res) => {
     }
 
     const queryHorario = `
-      INSERT INTO horario (inicio, final, id_paciente, estado)
-      VALUES ($1, $2, $3, 'aceptado')
+      INSERT INTO horario (inicio, final, id_paciente, estado, especialidad)
+      VALUES ($1, $2, $3, 'aceptado', $4)
       RETURNING *;
     `;
-    const resHorario = await client.query(queryHorario, [localInicio, localFinal, nuevoIdPaciente]);
+    const resHorario = await client.query(queryHorario, [localInicio, localFinal, nuevoIdPaciente, especialidad || 'fonoaudiologia']);
     await client.query('COMMIT');
 
     res.status(201).json({
@@ -174,7 +176,7 @@ app.post('/api/admin/pacientes', authMiddleware, async (req, res) => {
 
 app.post('/api/admin/horario', authMiddleware, async (req, res) => {
   try {
-    const { id_paciente, inicio } = req.body;
+    const { id_paciente, inicio, especialidad } = req.body;
     const inicioDate = new Date(inicio);
     const finalDate = new Date(inicioDate.getTime() + 45 * 60000);
 
@@ -186,10 +188,10 @@ app.post('/api/admin/horario', authMiddleware, async (req, res) => {
     }
 
     const query = `
-      INSERT INTO horario (inicio, final, id_paciente, estado)
-      VALUES ($1, $2, $3, 'aceptado') RETURNING *;
+      INSERT INTO horario (inicio, final, id_paciente, estado, especialidad)
+      VALUES ($1, $2, $3, 'aceptado', $4) RETURNING *;
     `;
-    const { rows } = await pool.query(query, [localInicio, localFinal, id_paciente]);
+    const { rows } = await pool.query(query, [localInicio, localFinal, id_paciente, especialidad || 'fonoaudiologia']);
     res.status(201).json(rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
@@ -225,6 +227,127 @@ app.delete('/api/admin/horario/:id', authMiddleware, async (req, res) => {
     res.status(200).json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+const cronAuth = (req, res, next) => {
+  if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  next();
+};
+
+app.post('/api/cron/duplicar-semana', cronAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    // Definimos el rango: la semana que acaba de pasar (Lunes a Domingo)
+    const today = new Date(); // Asumimos que corre Domingo 23:50
+    const endDate = new Date(today);
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - 6);
+    startDate.setHours(0, 0, 0, 0);
+
+    const query = `
+      SELECT * FROM horario 
+      WHERE inicio >= $1 AND inicio <= $2 
+      AND especialidad = 'fonoaudiologia' 
+      AND estado != 'rechazado'
+    `;
+    const result = await client.query(query, [startDate, endDate]);
+    
+    await client.query('BEGIN');
+    
+    for (const row of result.rows) {
+      const start = new Date(row.inicio);
+      const end = new Date(row.final);
+      start.setDate(start.getDate() + 7);
+      end.setDate(end.getDate() + 7);
+      
+      const localInicio = toLocalDBString(start);
+      const localFinal = toLocalDBString(end);
+      
+      if (!(await checkOverlap(client, localInicio, localFinal))) {
+        const insertQ = `
+          INSERT INTO horario (inicio, final, id_paciente, estado, especialidad)
+          VALUES ($1, $2, $3, $4, $5)
+        `;
+        await client.query(insertQ, [localInicio, localFinal, row.id_paciente, row.estado, 'fonoaudiologia']);
+      }
+    }
+    
+    await client.query('COMMIT');
+    res.status(200).json({ mensaje: 'Semana de fonoaudiologia duplicada automaticamente.' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error en cron duplicar:', error);
+    res.status(500).json({ error: 'Error interno cron' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/cron/mantenimiento-mensual', cronAuth, async (req, res) => {
+  try {
+    // 1. Obtener datos antiguos (ej. anteriores a este mes/semana)
+    // Para simplificar, obtenemos todo lo del mes pasado o hasta hoy.
+    const today = new Date();
+    const query = `
+      SELECT h.inicio, h.final, p.nombre, h.especialidad 
+      FROM horario h JOIN paciente p ON h.id_paciente = p.id_paciente
+      WHERE h.inicio < $1 ORDER BY h.inicio ASC
+    `;
+    const result = await pool.query(query, [today]);
+
+    // 2. Generar PDF en memoria
+    const doc = new PDFDocument();
+    let buffers = [];
+    doc.on('data', buffers.push.bind(buffers));
+    
+    doc.fontSize(20).text('Reporte Mensual de Citas', { align: 'center' });
+    doc.moveDown();
+    
+    result.rows.forEach(r => {
+      const fecha = new Date(r.inicio).toLocaleString('es-ES');
+      doc.fontSize(12).text(`- ${fecha} | Paciente: ${r.nombre} | Especialidad: ${r.especialidad}`);
+    });
+    
+    doc.end();
+
+    const pdfData = await new Promise((resolve) => {
+      doc.on('end', () => {
+        resolve(Buffer.concat(buffers));
+      });
+    });
+
+    // 3. Enviar por email
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: process.env.EMAIL_ADMIN,
+      subject: 'Reporte Mensual y Limpieza de Base de Datos',
+      text: 'Adjunto el reporte en PDF de las citas pasadas. La base de datos ha sido limpiada.',
+      attachments: [{
+        filename: 'reporte_citas.pdf',
+        content: pdfData
+      }]
+    });
+
+    // 4. Limpiar DB (eliminar citas anteriores a hace 1 semana para mantener la plantilla)
+    const unaSemanaAtras = new Date(today);
+    unaSemanaAtras.setDate(today.getDate() - 7);
+    await pool.query(`DELETE FROM horario WHERE inicio < $1`, [unaSemanaAtras]);
+
+    res.status(200).json({ mensaje: 'Mantenimiento mensual completado. PDF enviado.' });
+  } catch (error) {
+    console.error('Error en mantenimiento:', error);
+    res.status(500).json({ error: 'Error en mantenimiento' });
   }
 });
 

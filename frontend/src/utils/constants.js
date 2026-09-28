@@ -11,3 +11,10 @@ export const getPatientColor = (id_paciente) => {
     text: `hsl(${hue}, 70%, 20%)`
   };
 };
+export const getEspecialidadColor = (especialidad) => {
+  if (especialidad === 'cosmetologia') {
+    return { bg: '#fdf4ff', border: '#d946ef', text: '#86198f' }; // Pink/Purple hues
+  }
+  // Default fonoaudiologia
+  return { bg: '#e0f2fe', border: '#0ea5e9', text: '#075985' }; // Blue hues
+};

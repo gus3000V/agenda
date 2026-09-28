@@ -14,6 +14,7 @@ const step = ref(1);
 const searchName = ref('');
 const isSubmitting = ref(false);
 const isMobileOpen = ref(false);
+const selectedEspecialidad = ref('fonoaudiologia');
 
 const newPatientForm = ref({
   f_nacimiento: '',
@@ -51,7 +52,7 @@ const onNombreEnter = () => {
   if (filteredPacientes.value.length > 0) {
     inputNombre.value?.blur();
     isMobileOpen.value = false;
-    emit('start-placement', filteredPacientes.value[0]);
+    emit('start-placement', filteredPacientes.value[0], selectedEspecialidad.value);
   } else if (searchName.value.trim().length > 0) {
     step.value = 2;
     nextTick(() => inputFecha.value?.focus());
@@ -117,7 +118,7 @@ const onTelefonoEnter = async () => {
     emit('patient-created', newPatient);
     inputTelefono.value?.blur();
     isMobileOpen.value = false;
-    emit('start-placement', newPatient);
+    emit('start-placement', newPatient, selectedEspecialidad.value);
   } catch (e) {
     console.error(e);
     alert('Error al crear paciente');
@@ -129,7 +130,7 @@ const onTelefonoEnter = async () => {
 const onSelectPatient = (patient) => {
   if (props.placementMode) return;
   isMobileOpen.value = false;
-  emit('start-placement', patient);
+  emit('start-placement', patient, selectedEspecialidad.value);
 };
 
 const cancelPlacement = () => {
@@ -170,6 +171,14 @@ const cancelPlacement = () => {
 
     <div class="p-4 overflow-y-auto flex-1" :class="{'opacity-50 pointer-events-none': placementMode}">
       <div class="space-y-4">
+        <div v-if="step === 1">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Especialidad</label>
+          <select v-model="selectedEspecialidad" class="w-full px-3 py-2 mb-4 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-base md:text-sm bg-white">
+            <option value="fonoaudiologia">Fonoaudiologia</option>
+            <option value="cosmetologia">Cosmetologia</option>
+          </select>
+        </div>
+
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Nombre del Paciente</label>
           <input type="text" v-model="searchName" @keydown.enter="onNombreEnter" ref="inputNombre"

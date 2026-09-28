@@ -1,10 +1,10 @@
 <script setup>
 import { ref, watch, onUnmounted } from 'vue';
-import { format, differenceInDays, startOfDay, set } from 'date-fns';
+import { format, differenceInDays, startOfDay, set, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import EventBlock from './EventBlock.vue';
 import { useDragAndDrop } from '../composables/useDragAndDrop';
-import { pxPerHour, pxPerMinute, blockDuration, getPatientColor } from '../utils/constants';
+import { pxPerHour, pxPerMinute, blockDuration, getEspecialidadColor } from '../utils/constants';
 import { updateHorarioEstado, updateHorarioInicio, deleteHorario, createHorario } from '../services/apiService';
 
 const props = defineProps({
@@ -12,7 +12,8 @@ const props = defineProps({
   days: Array,
   startDate: Date,
   placementMode: Boolean,
-  placementPatient: Object
+  placementPatient: Object,
+  placementEspecialidad: String
 });
 
 const emit = defineEmits(['logout', 'refresh-data', 'cancel-placement']);
@@ -52,6 +53,7 @@ watch(() => props.placementMode, (newVal) => {
       mobileAction.value = {
         type: 'PLACE',
         patient: props.placementPatient,
+        especialidad: props.placementEspecialidad,
         step: 2,
         pendingDate: null
       };
@@ -116,7 +118,7 @@ const confirmMobileAction = async () => {
     mobileAction.value.type = null;
     dragGhost.value.visible = false;
     try {
-      await createHorario(pId, isoStr);
+      await createHorario(pId, isoStr, mobileAction.value.especialidad);
       emit('refresh-data');
       emit('cancel-placement');
     } catch (e) {
@@ -206,7 +208,7 @@ const handleGridClick = async (event, dayIndex) => {
   const patientId = props.placementPatient.id_paciente;
   cleanUpDrag();
   try {
-    await createHorario(patientId, toLocalISOString(newDate));
+    await createHorario(patientId, toLocalISOString(newDate), props.placementEspecialidad);
     emit('refresh-data');
     emit('cancel-placement');
   } catch (e) {
@@ -235,6 +237,8 @@ const handleConfirmDelete = async (id) => {
     alert('Error al eliminar reserva');
   }
 };
+
+
 
 onUnmounted(() => {
   unbindGlobalEvents();
@@ -312,16 +316,14 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <div v-if="dragGhost.visible && dragGhost.dayIndex === dayIndex"
+                     <div v-if="dragGhost.visible && dragGhost.dayIndex === dayIndex"
                      class="absolute left-1 right-1 rounded-md opacity-80 z-50 pointer-events-none shadow-md overflow-hidden flex flex-col justify-center p-2 text-xs border-2"
-                     :class="[
-                       placementMode ? getPatientColor(placementPatient?.id_paciente).bg : (mobileAction.type ? getPatientColor(mobileAction.horario?.id_paciente).bg : getPatientColor(draggingHorario?.id_paciente).bg),
-                       placementMode ? getPatientColor(placementPatient?.id_paciente).border : (mobileAction.type ? getPatientColor(mobileAction.horario?.id_paciente).border : getPatientColor(draggingHorario?.id_paciente).border),
-                       placementMode ? getPatientColor(placementPatient?.id_paciente).text : (mobileAction.type ? getPatientColor(mobileAction.horario?.id_paciente).text : getPatientColor(draggingHorario?.id_paciente).text)
-                     ]"
                      :style="{ 
                        top: `${dragGhost.top}px`, 
-                       height: `${dragGhost.height}px`
+                       height: `${dragGhost.height}px`,
+                       backgroundColor: placementMode ? getEspecialidadColor(placementEspecialidad).bg : (mobileAction.type ? getEspecialidadColor(mobileAction.horario?.especialidad).bg : getEspecialidadColor(draggingHorario?.especialidad).bg),
+                       borderColor: placementMode ? getEspecialidadColor(placementEspecialidad).border : (mobileAction.type ? getEspecialidadColor(mobileAction.horario?.especialidad).border : getEspecialidadColor(draggingHorario?.especialidad).border),
+                       color: placementMode ? getEspecialidadColor(placementEspecialidad).text : (mobileAction.type ? getEspecialidadColor(mobileAction.horario?.especialidad).text : getEspecialidadColor(draggingHorario?.especialidad).text)
                      }">
                      <div class="font-bold truncate leading-tight">{{ placementMode ? placementPatient?.nombre : (mobileAction.type ? mobileAction.horario?.nombre : draggingHorario?.nombre) }}</div>
                 </div>

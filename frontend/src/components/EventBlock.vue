@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { differenceInDays, parseISO, format, getHours, getMinutes, startOfDay } from 'date-fns';
-import { getPatientColor, pxPerHour, pxPerMinute, blockDuration } from '../utils/constants';
+import { getPatientColor, getEspecialidadColor, pxPerHour, pxPerMinute, blockDuration } from '../utils/constants';
 
 const props = defineProps({
   horario: Object,
@@ -27,14 +27,10 @@ const blockStyle = computed(() => {
       top: `${top}px`, height: `${height}px`, left: '4px', right: '4px', position: 'absolute',
       backgroundColor: '#fffbeb', borderColor: '#f59e0b', color: '#92400e', borderLeftWidth: '4px'
     };
-  } else if (props.horario.estado === 'aceptado') {
-    return {
-      top: `${top}px`, height: `${height}px`, left: '4px', right: '4px', position: 'absolute',
-      backgroundColor: '#ecfdf5', borderColor: '#10b981', color: '#065f46', borderLeftWidth: '4px'
-    };
   }
 
-  const colors = getPatientColor(props.horario.id_paciente);
+  // Use especialidad color for 'aceptado' or default
+  const colors = getEspecialidadColor(props.horario.especialidad);
   return {
     top: `${top}px`, height: `${height}px`, left: '4px', right: '4px', position: 'absolute',
     backgroundColor: colors.bg, borderColor: colors.border, color: colors.text, borderLeftWidth: '4px'

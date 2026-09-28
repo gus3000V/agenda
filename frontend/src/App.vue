@@ -14,6 +14,7 @@ const days = computed(() => Array.from({ length: 7 }).map((_, i) => addDays(star
 
 const placementMode = ref(false);
 const placementPatient = ref(null);
+const placementEspecialidad = ref('fonoaudiologia');
 
 let pollingInterval = null;
 
@@ -73,14 +74,16 @@ const fetchData = async () => {
   }
 };
 
-const startPlacement = (patient) => {
+const startPlacement = (patient, especialidad = 'fonoaudiologia') => {
   placementPatient.value = patient;
+  placementEspecialidad.value = especialidad;
   placementMode.value = true;
 };
 
 const cancelPlacement = () => {
   placementMode.value = false;
   placementPatient.value = null;
+  placementEspecialidad.value = 'fonoaudiologia';
 };
 </script>
 
@@ -88,7 +91,7 @@ const cancelPlacement = () => {
   <LoginPanel v-if="!isAuthenticated" @login="handleLogin" />
   
   <div v-else class="h-screen flex bg-gray-50 overflow-hidden relative">
-    <SidebarPanel 
+    <SidebarPanel class="print:hidden"
       :pacientes="pacientes"
       :placement-mode="placementMode"
       :placement-patient="placementPatient"
@@ -102,6 +105,7 @@ const cancelPlacement = () => {
       :start-date="startDate"
       :placement-mode="placementMode"
       :placement-patient="placementPatient"
+      :placement-especialidad="placementEspecialidad"
       @logout="handleLogout"
       @refresh-data="fetchData"
       @cancel-placement="cancelPlacement"
