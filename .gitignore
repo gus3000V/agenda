@@ -3,3 +3,5 @@ node_modules
 .env
 **/.env
 backend/.env
+agend_fronted/dist/
+.ui-checks/

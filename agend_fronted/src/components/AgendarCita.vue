@@ -1,5 +1,5 @@
 <template>
-  <div class="h-screen w-full bg-gray-50 flex flex-col font-sans overflow-hidden">
+  <div class="h-dvh w-full bg-gray-50 flex flex-col font-sans overflow-hidden">
     
     <!-- Encabezado -->
     <header class="bg-blue-600 text-white px-4 md:px-6 py-4 shadow-md shrink-0 flex flex-col sm:flex-row sm:justify-between sm:items-center z-10">
@@ -9,11 +9,16 @@
       </div>
     </header>
 
+    <nav aria-label="Seleccionar día" class="lg:hidden flex gap-2 overflow-x-auto bg-white p-3 shrink-0 border-b">
+      <button v-for="dia in diasSemana" :key="dia.fechaStr" @click="diaSeleccionado = dia.fechaStr" :aria-pressed="diaSeleccionado === dia.fechaStr" class="shrink-0 rounded-xl border px-4 py-3 text-sm" :class="diaSeleccionado === dia.fechaStr ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700'">
+        <span class="block font-bold">{{ dia.nombreDia }}</span>{{ dia.fechaCorta }}
+      </button>
+    </nav>
     <!-- Cuadrícula Principal (Lunes a Sábado) -->
     <main class="flex-1 overflow-y-auto md:overflow-hidden p-2 sm:p-4">
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 md:h-full">
+      <div class="grid grid-cols-1 lg:grid-cols-6 gap-4 md:h-full">
         <!-- Columnas por Día -->
-        <div v-for="dia in diasSemana" :key="dia.fechaStr" class="bg-white flex flex-col rounded-lg shadow-sm border border-gray-200 overflow-hidden h-auto md:h-full">
+        <div v-for="dia in diasSemana" :key="dia.fechaStr" :class="diaSeleccionado === dia.fechaStr ? 'flex' : 'hidden lg:flex'" class="bg-white flex-col rounded-lg shadow-sm border border-gray-200 overflow-hidden h-auto md:h-full">
           
           <!-- Encabezado del Día -->
           <div class="bg-gray-100 text-center py-2 sm:py-3 shrink-0 border-b border-gray-200">
@@ -22,11 +27,15 @@
           </div>
 
           <!-- Bloques Libres -->
-          <div class="md:flex-1 md:overflow-y-auto p-3 grid grid-cols-3 gap-2 md:flex md:flex-col md:space-y-2 md:grid-cols-none relative">
+          <div class="flex-1 overflow-y-auto p-3 grid content-start grid-cols-3 gap-3 lg:flex lg:flex-col relative">
             <div v-if="dia.cargando && dia.disponibles.length === 0" class="col-span-3 md:col-span-1 flex justify-center items-center min-h-[50px] md:h-full text-gray-400">
               <span class="animate-pulse text-sm">Cargando...</span>
             </div>
             
+            <div v-else-if="dia.error" role="alert" class="col-span-3 text-center text-red-700 p-4">
+              No pudimos cargar los horarios.
+              <button @click="cargarDisponibilidadMasiva()" class="block mx-auto underline p-3">Reintentar</button>
+            </div>
             <template v-else>
               <button 
                 v-for="slot in dia.disponibles" 
@@ -34,7 +43,7 @@
                 @click="slot.estado === 'libre' ? abrirFormulario(dia, slot.hora) : null"
                 :disabled="slot.estado === 'pendiente'"
                 :class="[
-                  'w-full py-2 rounded-md text-sm font-semibold transition-all shadow-sm flex flex-col items-center justify-center',
+                  'w-full min-h-12 py-3 rounded-md text-sm font-semibold transition-all shadow-sm flex flex-col items-center justify-center',
                   slot.estado === 'libre' 
                     ? 'bg-emerald-50 hover:bg-emerald-500 hover:text-white text-emerald-700 border border-emerald-200 cursor-pointer' 
                     : 'bg-yellow-50 text-yellow-700 border border-yellow-300 opacity-80 cursor-not-allowed'
@@ -55,13 +64,13 @@
     </main>
 
     <!-- Panel Lateral / Modal del Formulario -->
-    <div v-if="modalAbierto" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex justify-center sm:justify-end z-40 transition-opacity">
+    <dialog ref="formDialog" @cancel.prevent="!enviando && cerrarFormulario()" aria-label="Solicitar cita" class="booking-dialog fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex justify-center sm:justify-end z-40 transition-opacity">
       <div class="w-full h-full sm:max-w-md bg-white shadow-2xl flex flex-col animate-slide-in">
         
         <!-- Header del Formulario -->
         <div class="px-4 sm:px-6 py-4 bg-white border-b border-gray-200 flex justify-between items-center shrink-0">
           <h2 class="text-lg sm:text-xl font-bold text-gray-800">Completar Solicitud</h2>
-          <button @click="cerrarFormulario" class="text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full p-2 transition-colors">
+          <button :disabled="enviando" aria-label="Cerrar formulario" @click="cerrarFormulario" class="text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full p-2 transition-colors">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
         </div>
@@ -71,7 +80,7 @@
           <div class="mb-4 sm:mb-6 p-3 sm:p-4 bg-blue-50 border border-blue-100 rounded-lg shadow-sm">
             <p class="text-xs sm:text-sm text-blue-800">Estás agendando cita para el:</p>
             <p class="text-base sm:text-lg font-bold text-blue-900 mt-1">
-              {{ reservaActiva.dia.nombreDia }}, {{ reservaActiva.dia.fechaCorta }} a las {{ reservaActiva.hora }} hrs.
+              {{ reservaActiva.dia?.nombreDia }}, {{ reservaActiva.dia?.fechaCorta }} a las {{ reservaActiva.hora }} hrs.
             </p>
           </div>
 
@@ -79,25 +88,25 @@
           <form @submit.prevent="enviarSolicitud" class="space-y-4 sm:space-y-5">
             <div>
               <label class="block text-sm font-semibold text-gray-700 mb-1">Nombre Completo del Paciente *</label>
-              <input type="text" v-model="form.nombre" required placeholder="Ej: Juan Pérez"
+              <input type="text" autocomplete="name" maxlength="150" aria-label="Nombre completo del paciente" v-model="form.nombre" required placeholder="Ej: Juan Pérez"
                      class="w-full border border-gray-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm text-base sm:text-sm" />
             </div>
             
             <div>
               <label class="block text-sm font-semibold text-gray-700 mb-1">Fecha de Nacimiento *</label>
-              <input type="text" :value="form.f_nacimiento" @input="onFechaInput" required placeholder="DD/MM/AAAA"
+              <input type="text" inputmode="numeric" aria-label="Fecha de nacimiento, día mes y año" :value="form.f_nacimiento" @input="onFechaInput" required placeholder="DD/MM/AAAA"
                      class="w-full border border-gray-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm text-base sm:text-sm" />
             </div>
             
             <div v-if="isMinor">
               <label class="block text-sm font-semibold text-gray-700 mb-1">Nombre del Tutor *</label>
-              <input type="text" v-model="form.nombre_tutor" placeholder="Requerido para menores" :required="isMinor"
+              <input type="text" maxlength="150" aria-label="Nombre del tutor" v-model="form.nombre_tutor" placeholder="Requerido para menores" :required="isMinor"
                      class="w-full border border-gray-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm text-base sm:text-sm" />
             </div>
             
             <div>
               <label class="block text-sm font-semibold text-gray-700 mb-1">Teléfono Móvil *</label>
-              <input type="tel" v-model="form.telefono" required placeholder="Ej: 555-1234"
+              <input type="tel" autocomplete="tel" maxlength="40" aria-label="Teléfono móvil" v-model="form.telefono" required placeholder="Ej: 555-1234"
                      class="w-full border border-gray-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none shadow-sm text-base sm:text-sm" />
             </div>
             
@@ -109,16 +118,16 @@
             <div class="pt-2 sm:pt-4">
               <button type="submit" :disabled="enviando" 
                       class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
-                {{ enviando ? 'Procesando Solicitud...' : 'Confirmar Cita' }}
+                {{ enviando ? 'Procesando Solicitud...' : 'Enviar solicitud' }}
               </button>
             </div>
           </form>
         </div>
       </div>
-    </div>
+    </dialog>
 
     <!-- Toast de Éxito Flotante -->
-    <div v-if="successMsg" class="fixed bottom-6 sm:bottom-10 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 sm:px-6 py-3 sm:py-4 rounded-full shadow-2xl z-50 flex items-center font-medium animate-fade-in-up text-sm sm:text-base w-11/12 sm:w-auto justify-center">
+    <div role="status" v-if="successMsg" class="fixed bottom-6 sm:bottom-10 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 sm:px-6 py-3 sm:py-4 rounded-full shadow-2xl z-50 flex items-center font-medium animate-fade-in-up text-sm sm:text-base w-11/12 sm:w-auto justify-center">
       <span class="bg-green-500 rounded-full w-5 h-5 sm:w-6 sm:h-6 flex items-center justify-center mr-2 sm:mr-3 text-xs sm:text-base">✓</span>
       {{ successMsg }}
     </div>
@@ -131,12 +140,14 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
 
 // URL del servidor (público)
-const apiPublicaURL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/public';
+const apiPublicaURL = import.meta.env.API_URL || '/api/public';
 
 // ==========================================
 // ESTADO Y REACTIVIDAD
 // ==========================================
 const diasSemana = ref([]);
+const diaSeleccionado = ref('');
+const formDialog = ref(null);
 const modalAbierto = ref(false);
 const enviando = ref(false);
 const errorMsg = ref('');
@@ -210,6 +221,7 @@ const inicializarDias = () => {
     diaActual.setDate(diaActual.getDate() + 1);
   }
   diasSemana.value = arr;
+  diaSeleccionado.value = arr[0].fechaStr;
 };
 
 // Traer la data de Axios para toda la semana al mismo tiempo
@@ -221,7 +233,10 @@ const cargarDisponibilidadMasiva = async (esPolling = false) => {
         params: { fecha: dia.fechaStr } 
       });
       dia.disponibles = data.disponibles || [];
+      dia.error = false;
     } catch (error) {
+      dia.error = true;
+      dia.disponibles = [];
       console.error(`Fallo cargando citas de ${dia.fechaStr}:`, error);
     } finally {
       if (!esPolling) dia.cargando = false;
@@ -253,14 +268,17 @@ const abrirFormulario = (dia, hora) => {
   reservaActiva.hora = hora;
   errorMsg.value = '';
   modalAbierto.value = true;
+  formDialog.value.showModal();
 };
 
 const cerrarFormulario = () => {
   modalAbierto.value = false;
+  formDialog.value.close();
   Object.assign(form, { nombre: '', f_nacimiento: '', nombre_tutor: '', telefono: '' });
 };
 
 const enviarSolicitud = async () => {
+  if (enviando.value) return;
   errorMsg.value = '';
 
   if (form.f_nacimiento.length !== 10) {
@@ -309,7 +327,8 @@ const enviarSolicitud = async () => {
     if (error.response?.status === 429) {
       errorMsg.value = 'Se superó el límite de peticiones. Intenta de nuevo más tarde.';
     } else {
-      errorMsg.value = 'Hubo un problema. Es posible que el horario ya se haya ocupado.';
+      errorMsg.value = error.response?.data?.error || 'No se pudo conectar. Revisa tu conexión e intenta nuevamente.';
+      if (error.response?.status === 409) await cargarDisponibilidadMasiva(true);
     }
   } finally {
     enviando.value = false;
@@ -318,6 +337,10 @@ const enviarSolicitud = async () => {
 </script>
 
 <style scoped>
+.booking-dialog { border: 0; padding: 0; margin: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; }
+.booking-dialog:not([open]) { display: none; }
+.booking-dialog::backdrop { background: rgb(17 24 39 / 40%); }
+
 .animate-slide-in {
   animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
@@ -329,7 +352,7 @@ const enviarSolicitud = async () => {
   animation: fadeInUp 0.4s ease-out forwards;
 }
 @keyframes fadeInUp {
-  from { opacity: 0; transform: translate(-50%, 20px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>

@@ -43,7 +43,7 @@ watch(() => props.placementMode, (newVal) => {
     step.value = 1;
     searchName.value = '';
     newPatientForm.value = { f_nacimiento: '', nombre_tutor: '', telefono: '' };
-    nextTick(() => inputNombre.value?.focus());
+    if (window.matchMedia('(min-width: 1024px)').matches) nextTick(() => inputNombre.value?.focus());
   }
 });
 
@@ -121,7 +121,7 @@ const onTelefonoEnter = async () => {
     emit('start-placement', newPatient, selectedEspecialidad.value);
   } catch (e) {
     console.error(e);
-    alert('Error al crear paciente');
+    alert(e.message);
   } finally {
     isSubmitting.value = false;
   }
@@ -138,33 +138,33 @@ const cancelPlacement = () => {
   step.value = 1;
   searchName.value = '';
   newPatientForm.value = { f_nacimiento: '', nombre_tutor: '', telefono: '' };
-  nextTick(() => inputNombre.value?.focus());
+  if (window.matchMedia('(min-width: 1024px)').matches) nextTick(() => inputNombre.value?.focus());
 };
 </script>
 
 <template>
   <!-- Botón FAB Flotante Móvil -->
   <button v-if="!placementMode && !isMobileOpen" 
-    @click="isMobileOpen = true"
-    class="md:hidden fixed bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center z-40 hover:bg-blue-700 active:scale-95 transition-transform">
+    aria-label="Agendar nueva cita" @click="isMobileOpen = true"
+    class="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center z-40 hover:bg-blue-700 active:scale-95 transition-transform">
     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
   </button>
 
   <!-- Overlay de fondo oscuro en Móvil -->
-  <div v-if="isMobileOpen" @click="isMobileOpen = false" class="md:hidden fixed inset-0 bg-gray-900/50 z-40 backdrop-blur-sm transition-opacity"></div>
+  <div v-if="isMobileOpen" aria-label="Cerrar panel" @click="isMobileOpen = false" class="lg:hidden fixed inset-0 bg-gray-900/50 z-40 backdrop-blur-sm transition-opacity"></div>
 
   <!-- Panel -->
   <aside :class="[
-    'bg-white flex flex-col shadow-[0_-10px_40px_rgba(0,0,0,0.1)] md:shadow-sm z-50 transition-transform duration-300 rounded-t-2xl md:rounded-none',
-    'fixed inset-x-0 bottom-0 max-h-[85vh] md:relative md:w-80 md:max-h-none md:border-r md:border-gray-200',
-    isMobileOpen ? 'translate-y-0' : 'translate-y-full md:translate-y-0'
+    'bg-white flex flex-col shadow-[0_-10px_40px_rgba(0,0,0,0.1)] lg:shadow-sm z-50 transition-transform duration-300 rounded-t-2xl lg:rounded-none',
+    'fixed inset-x-0 bottom-0 max-h-[85vh] lg:relative lg:w-80 lg:max-h-none lg:border-r lg:border-gray-200',
+    isMobileOpen ? 'visible translate-y-0' : 'invisible lg:visible translate-y-full lg:translate-y-0'
   ]">
     <div class="p-4 border-b border-gray-200 flex justify-between items-center shrink-0">
       <div>
         <h2 class="text-xl font-bold text-gray-800">Agendar Cita</h2>
-        <p class="text-xs text-gray-500 mt-1">Presiona Enter para avanzar</p>
+        <p class="text-xs text-gray-500 mt-1">Completa los datos y pulsa Continuar</p>
       </div>
-      <button @click="isMobileOpen = false" class="md:hidden text-gray-400 hover:text-gray-700 p-2 rounded-full">
+      <button aria-label="Cerrar panel" @click="isMobileOpen = false" class="lg:hidden text-gray-400 hover:text-gray-700 p-2 rounded-full">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
       </button>
     </div>
@@ -173,7 +173,7 @@ const cancelPlacement = () => {
       <div class="space-y-4">
         <div v-if="step === 1">
           <label class="block text-sm font-medium text-gray-700 mb-1">Especialidad</label>
-          <select v-model="selectedEspecialidad" class="w-full px-3 py-2 mb-4 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-base md:text-sm bg-white">
+          <select v-model="selectedEspecialidad" class="w-full px-3 py-2 mb-4 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-base lg:text-sm bg-white">
             <option value="fonoaudiologia">Fonoaudiologia</option>
             <option value="cosmetologia">Cosmetologia</option>
           </select>
@@ -182,8 +182,8 @@ const cancelPlacement = () => {
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Nombre del Paciente</label>
           <input type="text" v-model="searchName" @keydown.enter="onNombreEnter" ref="inputNombre"
-                 placeholder="Escribe y presiona Enter..."
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-base md:text-sm">
+                 placeholder="Busca o registra un paciente"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-base lg:text-sm">
           
           <ul class="border border-gray-200 rounded-md mt-1 max-h-32 overflow-y-auto shadow-sm" v-if="step === 1 && searchName && filteredPacientes.length > 0">
             <li v-for="p in filteredPacientes" :key="p.id_paciente"
@@ -196,24 +196,26 @@ const cancelPlacement = () => {
 
         <div v-if="step >= 2">
           <label class="block text-sm font-medium text-gray-700 mb-1">Fecha de Nacimiento *</label>
-          <input type="text" :value="newPatientForm.f_nacimiento" @input="onFechaInput" @keydown.enter="onFechaEnter" ref="inputFecha"
+          <input type="text" inputmode="numeric" :value="newPatientForm.f_nacimiento" @input="onFechaInput" @keydown.enter="onFechaEnter" ref="inputFecha"
                  placeholder="DD/MM/AAAA"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50 text-base md:text-sm">
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50 text-base lg:text-sm">
         </div>
 
         <div v-if="step >= 3">
           <label class="block text-sm font-medium text-gray-700 mb-1">Nombre del Tutor (opcional)</label>
           <input type="text" v-model="newPatientForm.nombre_tutor" @keydown.enter="onTutorEnter" ref="inputTutor"
                  placeholder="Enter para omitir"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50 text-base md:text-sm">
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50 text-base lg:text-sm">
         </div>
 
         <div v-if="step >= 4">
           <label class="block text-sm font-medium text-gray-700 mb-1">Teléfono/Celular (opcional)</label>
-          <input type="text" v-model="newPatientForm.telefono" @keydown.enter="onTelefonoEnter" ref="inputTelefono"
+          <input type="tel" v-model="newPatientForm.telefono" @keydown.enter="onTelefonoEnter" ref="inputTelefono"
                  placeholder="Enter para guardar"
-                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50 text-base md:text-sm">
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50 text-base lg:text-sm">
         </div>
+        <button v-if="step < 4" type="button" @click="step === 1 ? onNombreEnter() : step === 2 ? onFechaEnter() : onTutorEnter()" class="w-full rounded-lg bg-blue-600 text-white p-3">Continuar</button>
+        <button v-else type="button" :disabled="isSubmitting" @click="onTelefonoEnter" class="w-full rounded-lg bg-blue-600 text-white p-3 disabled:opacity-50">{{ isSubmitting ? 'Guardando…' : 'Elegir fecha y hora' }}</button>
       </div>
     </div>
 

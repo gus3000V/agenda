@@ -1,12 +1,15 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { startOfWeek, addDays, parseISO } from 'date-fns';
-import { getHorarios, getPacientes } from './services/apiService';
+import { getHorarios, getPacientes, login, logout, hasSession, clearSession } from './services/apiService';
 import LoginPanel from './components/LoginPanel.vue';
 import SidebarPanel from './components/SidebarPanel.vue';
 import CalendarGrid from './components/CalendarGrid.vue';
 
 const isAuthenticated = ref(false);
+const loginError = ref('');
+const loading = ref(false);
+const dataError = ref('');
 const horarios = ref([]);
 const pacientes = ref([]);
 const startDate = ref(startOfWeek(new Date(), { weekStartsOn: 1 }));
@@ -30,28 +33,36 @@ const startPolling = () => {
 };
 
 onMounted(() => {
-  if (localStorage.getItem('admin_pin')) {
+  window.addEventListener('session-expired', resetSession);
+  if (hasSession()) {
     isAuthenticated.value = true;
     fetchData();
     startPolling();
   }
 });
 
-const handleLogin = (pin) => {
-  localStorage.setItem('admin_pin', pin);
-  isAuthenticated.value = true;
-  fetchData();
-  startPolling();
+const handleLogin = async (pin) => {
+  if (loading.value) return;
+  loading.value = true; loginError.value = '';
+  try {
+    await login(pin);
+    isAuthenticated.value = true;
+    await fetchData(); startPolling();
+  } catch (error) { loginError.value = error.message; }
+  finally { loading.value = false; }
 };
-
-const handleLogout = () => {
-  localStorage.removeItem('admin_pin');
-  isAuthenticated.value = false;
+const resetSession = () => {
+  clearSession(); isAuthenticated.value = false;
+  horarios.value = []; pacientes.value = []; cancelPlacement();
   if (pollingInterval) clearInterval(pollingInterval);
 };
-
+const handleLogout = async () => {
+  try { await logout(); } catch { /* Locally close even if offline. */ }
+  resetSession();
+};
 onUnmounted(() => {
   if (pollingInterval) clearInterval(pollingInterval);
+  window.removeEventListener('session-expired', resetSession);
 });
 
 const fetchData = async () => {
@@ -62,15 +73,18 @@ const fetchData = async () => {
       handleLogout();
       return;
     }
+    if (!isAuthenticated.value) return;
+    dataError.value = '';
     horarios.value = dataHorarios.map(h => ({
       ...h,
       inicio: parseISO(h.inicio),
       final: parseISO(h.final)
     }));
 
-    pacientes.value = await getPacientes();
+    const dataPacientes = await getPacientes();
+    if (isAuthenticated.value) pacientes.value = dataPacientes;
   } catch (error) {
-    console.error('Error fetching data:', error);
+    dataError.value = error.message;
   }
 };
 
@@ -88,9 +102,10 @@ const cancelPlacement = () => {
 </script>
 
 <template>
-  <LoginPanel v-if="!isAuthenticated" @login="handleLogin" />
+  <LoginPanel v-if="!isAuthenticated" :error="loginError" :loading="loading" @login="handleLogin" />
   
-  <div v-else class="h-screen flex bg-gray-50 overflow-hidden relative">
+  <div v-else class="h-dvh flex bg-gray-50 overflow-hidden relative">
+    <div v-if="dataError" role="alert" class="absolute bottom-0 left-0 right-0 z-50 bg-red-100 p-3 text-red-800">{{ dataError }}</div>
     <SidebarPanel class="print:hidden"
       :pacientes="pacientes"
       :placement-mode="placementMode"

@@ -1,7 +1,8 @@
 <script setup>
-import { ref, watch, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { format, differenceInDays, startOfDay, set, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
+import MobileAgenda from './MobileAgenda.vue';
 import EventBlock from './EventBlock.vue';
 import { useDragAndDrop } from '../composables/useDragAndDrop';
 import { pxPerHour, pxPerMinute, blockDuration, getEspecialidadColor } from '../utils/constants';
@@ -48,6 +49,7 @@ const mobileAction = ref({
 });
 
 watch(() => props.placementMode, (newVal) => {
+  if (window.matchMedia('(max-width: 1023px)').matches) return;
   if (newVal) {
     if (isTouchModeActive()) {
       mobileAction.value = {
@@ -240,6 +242,8 @@ const handleConfirmDelete = async (id) => {
 
 
 
+onMounted(() => { if (scrollContainer.value) scrollContainer.value.scrollTop = 9 * pxPerHour; });
+
 onUnmounted(() => {
   unbindGlobalEvents();
   document.removeEventListener('mouseup', handleMouseUp);
@@ -254,32 +258,34 @@ onUnmounted(() => {
     <header class="bg-white shadow px-4 py-3 flex items-center justify-between z-20 shrink-0">
       <div>
         <h1 class="text-xl font-bold text-gray-800">Calendario</h1>
-        <div class="text-sm text-gray-500">Semana del {{ format(days[0], 'dd/MM/yyyy') }}</div>
+        <p class="lg:hidden text-sm text-gray-500">Agenda diaria</p>
+        <div class="hidden lg:block text-sm text-gray-500">Semana del {{ format(days[0], 'dd/MM/yyyy') }}</div>
       </div>
       <button @click="emit('logout')" class="text-sm text-red-600 hover:text-red-800 font-medium">Cerrar Sesión</button>
     </header>
 
-    <div class="flex-1 flex overflow-hidden p-0 md:p-4">
-      <div class="flex-1 bg-white md:border md:border-gray-200 md:rounded-lg md:shadow-sm flex flex-col overflow-hidden relative">
+    <MobileAgenda :horarios="horarios" :placement-mode="placementMode" :placement-patient="placementPatient" :placement-especialidad="placementEspecialidad" @refresh-data="emit('refresh-data')" @cancel-placement="emit('cancel-placement')" />
+    <div class="hidden lg:flex flex-1 overflow-hidden p-0 lg:p-4">
+      <div class="flex-1 bg-white lg:border lg:border-gray-200 lg:rounded-lg lg:shadow-sm flex flex-col overflow-hidden relative">
         
-        <div class="flex-1 overflow-auto relative grid-container snap-x snap-mandatory scroll-pl-14 md:scroll-pl-16" ref="scrollContainer">
+        <div class="flex-1 overflow-auto relative grid-container snap-x snap-mandatory scroll-pl-14 lg:scroll-pl-16" ref="scrollContainer">
           
           <!-- Sticky Header -->
-          <div class="flex border-b border-gray-200 bg-gray-50 z-30 sticky top-0 w-max min-w-full">
-            <div class="w-14 md:w-16 flex-none bg-gray-50 sticky left-0 z-40 border-r border-gray-200"></div>
-            <div v-for="(day, index) in days" :key="index" class="w-[calc(100vw-3.5rem)] sm:w-48 md:flex-1 min-w-[200px] py-2 md:py-3 text-center border-l border-gray-200 snap-start">
-              <div class="font-semibold text-gray-700 capitalize text-sm md:text-base">{{ format(day, 'EEEE', { locale: es }) }}</div>
-              <div class="text-xs md:text-sm text-gray-500">{{ format(day, 'dd/MM/yyyy') }}</div>
+          <div class="flex border-b border-gray-200 bg-gray-50 z-30 sticky top-0 w-max min-w-full lg:w-full">
+            <div class="w-14 lg:w-16 flex-none bg-gray-50 sticky left-0 z-40 border-r border-gray-200"></div>
+            <div v-for="(day, index) in days" :key="index" class="w-[calc(100vw-3.5rem)] sm:w-48 lg:flex-1 lg:w-0 min-w-[200px] lg:min-w-[140px] py-2 lg:py-3 text-center border-l border-gray-200 snap-start">
+              <div class="font-semibold text-gray-700 capitalize text-sm lg:text-base">{{ format(day, 'EEEE', { locale: es }) }}</div>
+              <div class="text-xs lg:text-sm text-gray-500">{{ format(day, 'dd/MM/yyyy') }}</div>
             </div>
           </div>
 
           <!-- Body -->
-          <div class="flex w-max min-w-full">
+          <div class="flex w-max min-w-full lg:w-full">
             
             <!-- Sticky Time Column -->
-            <div class="w-14 md:w-16 flex-none bg-gray-50 border-r border-gray-200 relative sticky left-0 z-20" :style="{ height: `${24 * pxPerHour}px` }">
+            <div class="w-14 lg:w-16 flex-none bg-gray-50 border-r border-gray-200 relative sticky left-0 z-20" :style="{ height: `${24 * pxPerHour}px` }">
               <div v-for="hour in 24" :key="hour" 
-                   class="absolute w-full text-right pr-1 md:pr-2 text-[10px] md:text-xs text-gray-500 -mt-2 md:-mt-2.5 font-medium"
+                   class="absolute w-full text-right pr-1 lg:pr-2 text-[10px] lg:text-xs text-gray-500 -mt-2 lg:-mt-2.5 font-medium"
                    :style="{ top: `${(hour - 1) * pxPerHour}px` }">
                 {{ String(hour - 1).padStart(2, '0') }}:00
               </div>
@@ -288,7 +294,7 @@ onUnmounted(() => {
             <!-- Day Columns -->
             <div class="flex flex-1 relative">
               <div v-for="(day, dayIndex) in days" :key="dayIndex"
-                   class="w-[calc(100vw-3.5rem)] sm:w-48 md:flex-1 min-w-[200px] border-l border-gray-200 relative day-column snap-start"
+                   class="w-[calc(100vw-3.5rem)] sm:w-48 lg:flex-1 lg:w-0 min-w-[200px] lg:min-w-[140px] border-l border-gray-200 relative day-column snap-start"
                    :style="{ height: `${24 * pxPerHour}px` }"
                    @mousemove="handleDayMouseMove($event, dayIndex)"
                    @mouseleave="handleDayMouseLeave"
@@ -336,7 +342,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Mobile Unified Action Panel -->
-    <div v-if="mobileAction.type" class="fixed bottom-4 right-4 left-4 md:hidden bg-white shadow-2xl rounded-xl border border-gray-200 p-4 z-50 animate-fade-in-up">
+    <div v-if="mobileAction.type" class="fixed bottom-4 right-4 left-4 lg:left-auto lg:w-[440px] bg-white shadow-2xl rounded-xl border border-gray-200 p-4 z-50 animate-fade-in-up">
       <div class="flex items-center justify-between">
         <div v-if="mobileAction.step === 1">
           <p class="font-bold text-gray-800">¿Mover cita?</p>
