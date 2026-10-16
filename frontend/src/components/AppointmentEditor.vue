@@ -54,7 +54,7 @@ async function save() {
         <select v-model="action" :disabled="busy" class="mt-1 w-full rounded-lg border p-3 bg-white">
           <option value="move">Cambiar horario</option>
           <option value="cancel">Cancelar cita</option>
-          <option v-if="!appointment.recurrente && appointment.especialidad === 'fonoaudiologia' && appointment.estado === 'aceptado'" value="convert">Repetir semanalmente desde esta cita</option>
+          <option v-if="!appointment.recurrente && !appointment.convertido_a_serie && appointment.especialidad === 'fonoaudiologia' && appointment.estado === 'aceptado'" value="convert">Repetir semanalmente con este horario</option>
         </select>
       </label>
       <label v-if="appointment.recurrente" class="block text-sm font-medium">Aplicar a
@@ -70,7 +70,7 @@ async function save() {
       <label v-if="action === 'convert' || (appointment.recurrente && scope === 'following' && action === 'move')" class="block text-sm">Última fecha de la repetición (opcional)
         <input v-model="end" :disabled="busy" type="date" :min="action === 'convert' ? format(appointment.inicio, 'yyyy-MM-dd') : date" class="mt-1 w-full rounded-lg border p-3" />
       </label>
-      <p v-if="action === 'convert'" class="text-sm bg-blue-50 p-3 rounded-lg">Esta cita será el inicio de una serie. Las otras citas existentes no se convertirán automáticamente. Si alguna coincide, se mostrará un conflicto.</p>
+      <p v-if="action === 'convert'" class="text-sm bg-blue-50 p-3 rounded-lg">Se repetirá cada semana el mismo día y a la misma hora. Si esta cita ya pasó, se conservará y la serie comenzará en la próxima fecha futura de ese día, según la hora de Bolivia. Si coincide con otra cita, se mostrará un conflicto.</p>
       <p v-if="action === 'cancel'" class="text-sm bg-red-50 p-3 rounded-lg">{{ appointment.recurrente && scope === 'following' ? 'Se finalizará la serie antes de esta cita. Las citas anteriores conservarán su horario.' : 'Se cancelará únicamente esta cita y se liberará su horario.' }}</p>
       <label v-if="appointment.recurrente && scope === 'following'" class="flex items-start gap-2 text-sm">
         <input v-model="confirmExceptions" :disabled="busy" type="checkbox" class="mt-1" />

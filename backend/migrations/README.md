@@ -48,8 +48,11 @@ Conservar el respaldo y preparar cualquier reversión con la agenda detenida.
 ## Uso
 
 Al agendar fonoaudiología, marcar «Repetir cada semana» y, si corresponde, indicar
-la última fecha. Una cita futura aceptada también puede convertirse desde su
-botón de edición. Cosmetología no ofrece repetición.
+la última fecha. Una cita aceptada también puede usarse desde su botón de edición.
+Si ya pasó, se conserva en el calendario y la serie comienza en la próxima fecha
+futura del mismo día semanal y hora de Bolivia. Si aún es futura, la serie comienza
+con esa cita. La fecha final opcional debe alcanzar el inicio de la nueva serie.
+Cosmetología no ofrece repetición. Este ajuste no necesita otra migración.
 
 En una cita semanal, elegir «Solo esta cita» para moverla o cancelarla sin
 afectar otras semanas. «Esta y las siguientes» finaliza el tramo anterior y,

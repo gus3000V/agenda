@@ -103,6 +103,7 @@ app.post('/api/public/solicitar', patientRequestLimiter, route(async (req, res) 
   await store.createPatientAndAppointment(req.body, true);
   res.status(201).json({ mensaje: 'Solicitud enviada. El consultorio confirmará su cita.' });
 }));
+app.use('/api', (req, res) => res.status(404).json({ error: 'Ruta de API no encontrada. Comprueba que frontend y backend estén actualizados.' }));
 app.use((error, req, res, next) => {
   if (res.headersSent) return next(error);
   // Never expose SQL, connection strings, or patient information in a response.

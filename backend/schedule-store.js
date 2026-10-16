@@ -6,11 +6,13 @@ const id = value => {
 };
 const snapshotSQL = `SELECT json_build_object(
   'singles', COALESCE((SELECT json_agg(x) FROM (
-    SELECT h.id_horario, h.id_paciente, h.estado, h.especialidad,
+    SELECT h.id_horario, h.id_paciente, h.estado, h.especialidad, h.convertido_a_serie,
       to_char(h.inicio, 'YYYY-MM-DD"T"HH24:MI:SS') AS inicio,
       to_char(h.final, 'YYYY-MM-DD"T"HH24:MI:SS') AS final,
       p.nombre, to_char(p.f_nacimiento, 'YYYY-MM-DD') AS f_nacimiento, p.nombre_tutor, p.telefono
-    FROM horario h JOIN paciente p USING (id_paciente) WHERE h.convertido_a_serie IS NULL
+    FROM horario h JOIN paciente p USING (id_paciente)
+    WHERE h.convertido_a_serie IS NULL OR h.inicio::date <
+      (SELECT s.fecha_inicio FROM cita_serie s WHERE s.id_serie = h.convertido_a_serie)
   ) x), '[]'::json),
   'series', COALESCE((SELECT json_agg(x) FROM (
     SELECT s.id_serie, s.id_paciente, s.dia_semana, s.duracion, s.zona_horaria,
@@ -94,13 +96,22 @@ function createStore(pool) {
     }),
     createSeries: (body, sourceId) => write(async (db, state) => {
       let source;
+      const now = r.clinicTimestamp();
       if (sourceId !== undefined) {
         source = findSingle(state, sourceId);
+        if (source.convertido_a_serie) throw r.fail('Esta cita ya tiene una serie asociada.', 409);
         if (source.especialidad !== 'fonoaudiologia' || source.estado !== 'aceptado') throw r.fail('Solo una cita aceptada de fonoaudiología puede convertirse.');
         if (source.final !== r.addMinutes(source.inicio, 45)) throw r.fail('La cita debe durar 45 minutos para convertirla.');
         body = { ...body, id_paciente: source.id_paciente, inicio: source.inicio, especialidad: source.especialidad };
+        // Keep the historical appointment; use its weekday/time for the next occurrence.
+        if (body.inicio <= now) {
+          const elapsedDays = Math.floor((Date.parse(`${now.slice(0, 10)}T00:00:00Z`) - Date.parse(`${source.inicio.slice(0, 10)}T00:00:00Z`)) / 86400000);
+          let nextDate = r.addDays(source.inicio.slice(0, 10), Math.floor(elapsedDays / 7) * 7);
+          if (`${nextDate}T${source.inicio.slice(11)}` <= now) nextDate = r.addDays(nextDate, 7);
+          body.inicio = `${nextDate}T${source.inicio.slice(11)}`;
+        }
       }
-      if (typeof body.inicio !== 'string' || body.inicio.replace(' ', 'T') < r.clinicTimestamp()) throw r.fail('La repetición debe comenzar en una cita futura.');
+      if (typeof body.inicio !== 'string' || body.inicio.replace(' ', 'T') <= now) throw r.fail('La repetición debe comenzar en una cita futura.');
       const series = await insertSeries(db, body, body.id_paciente);
       if (source) state.singles = state.singles.filter(h => h.id_horario !== source.id_horario);
       r.assertSeriesFree(state, series);

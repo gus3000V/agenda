@@ -101,3 +101,31 @@ test('acceptance and moves respect recurring reservations', async () => {
   const free = await store.createSingle({ ...base, inicio: '2099-01-06T09:00:00' });
   await assert.rejects(store.moveSingle(free.id_horario, base), { status: 409 });
 });
+
+test('a past Monday starts next Monday and retains history without allowing duplicate conversion', async () => {
+  const clock = r.clinicTimestamp;
+  r.clinicTimestamp = () => '2026-10-15T16:00:00';
+  try {
+    const source = await store.createSingle({ ...base, inicio: '2026-10-12T15:20:00' });
+    const series = await store.createSeries({}, source.id_horario);
+    assert.equal(series.fecha_inicio, '2026-10-19');
+    assert.equal(series.hora, '15:20:00');
+    const rows = await store.readRange('2026-10-12', '2026-10-27');
+    assert.deepEqual(rows.map(h => h.inicio), ['2026-10-12T15:20:00', '2026-10-19T15:20:00', '2026-10-26T15:20:00']);
+    assert.equal(rows[0].id_horario, source.id_horario);
+    await assert.rejects(store.createSeries({}, source.id_horario), { status: 409 });
+  } finally { r.clinicTimestamp = clock; }
+});
+
+test('past conversion validates next occurrence conflicts and end date without losing history', async () => {
+  const clock = r.clinicTimestamp;
+  r.clinicTimestamp = () => '2026-10-15T16:00:00';
+  try {
+    const source = await store.createSingle({ ...base, inicio: '2026-10-15T15:00:00' });
+    await assert.rejects(store.createSeries({ fecha_fin: '2026-10-16' }, source.id_horario), { status: 400 });
+    await store.createSingle({ ...base, inicio: '2026-10-22T15:00:00' });
+    await assert.rejects(store.createSeries({}, source.id_horario), { status: 409 });
+    assert.equal((await db.query('SELECT count(*)::int AS n FROM cita_serie')).rows[0].n, 0);
+    assert.equal((await db.query('SELECT convertido_a_serie FROM horario WHERE id_horario=$1', [source.id_horario])).rows[0].convertido_a_serie, null);
+  } finally { r.clinicTimestamp = clock; }
+});

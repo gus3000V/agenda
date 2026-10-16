@@ -11,7 +11,8 @@ async function request(url, method = 'GET', body) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) })
   });
   if (res.status !== 204 && !res.headers.get('content-type')?.includes('application/json')) {
-    throw new Error('El servidor devolvió una página en lugar de la API. Revisa API_URL del frontend y que el backend tenga /api/auth/login desplegado.');
+    const path = new URL(url, window.location.origin).pathname;
+    throw new Error(`El servidor devolvió una página en lugar de la API (${method} ${path}, HTTP ${res.status}). Comprueba que Render tenga desplegada esta ruta y que API_URL apunte al backend correcto.`);
   }
   const data = res.status === 204 ? null : await res.json();
   if (!res.ok) {
