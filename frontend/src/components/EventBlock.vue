@@ -52,7 +52,7 @@ const edad = computed(() => {
        
     <div class="absolute inset-0 p-1 overflow-hidden pointer-events-none rounded flex flex-col justify-between">
       <div>
-        <div class="font-bold pr-14"><span v-if="horario.recurrente" title="Cita semanal">↻ </span>{{ horario.nombre }}</div>
+        <div class="font-bold pr-14"><span v-if="horario.recurrente || horario.convertido_a_serie" :title="horario.recurrente ? 'Cita semanal' : 'Cita original con serie semanal asociada'" :aria-label="horario.recurrente ? 'Cita semanal' : 'Cita original con serie semanal asociada'">↻ </span>{{ horario.nombre }}</div>
         <div class="opacity-90">{{ format(horario.inicio, 'HH:mm') }} - {{ format(horario.final, 'HH:mm') }}</div>
         <div class="opacity-80 truncate mt-1">
           {{ horario.nombre_tutor ? `Tutor: ${horario.nombre_tutor}` : (horario.f_nacimiento ? `Edad: ${edad} años` : '') }}

@@ -50,6 +50,7 @@ async function save() {
         <button type="button" :disabled="busy" @click="close" aria-label="Cerrar editor" class="p-2">✕</button>
       </div>
       <p class="text-sm text-gray-600">{{ format(appointment.inicio, 'dd/MM/yyyy HH:mm') }} · {{ appointment.recurrente ? 'Repetición semanal' : appointment.especialidad }}</p>
+      <p v-if="!appointment.recurrente && appointment.convertido_a_serie" class="text-sm bg-blue-50 p-3 rounded-lg">↻ Esta cita dio origen a una serie semanal. Para cambiar la repetición, abre una de sus citas futuras.</p>
       <label class="block text-sm font-medium">Acción
         <select v-model="action" :disabled="busy" class="mt-1 w-full rounded-lg border p-3 bg-white">
           <option value="move">Cambiar horario</option>
