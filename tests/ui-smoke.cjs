@@ -21,7 +21,7 @@ async function serve(directory) {
   try {
     browser = await chromium.launch({ channel: 'msedge', headless: true });
     fs.mkdirSync('.ui-checks', { recursive: true });
-    for (const width of [360, 390, 768, 1440]) {
+    for (const width of [360, 447, 768, 1440]) {
       const context = await browser.newContext({ viewport: { width, height: 844 }, hasTouch: width < 1024 });
       const page = await context.newPage();
       const errors = [];
@@ -65,16 +65,39 @@ async function serve(directory) {
       await page.getByRole('heading', { name: 'Calendario', exact: true }).waitFor();
       assert.equal(await page.evaluate(() => localStorage.getItem('admin_pin')), null);
       if (width < 1024) {
-        await page.getByRole('button', { name: 'Mover', exact: true }).click();
-        await page.getByLabel('Hora', { exact: true }).fill('10:30');
-        await page.getByRole('button', { name: 'Guardar cita', exact: true }).click();
-        await page.getByRole('heading', { name: 'Mover cita', exact: true }).waitFor({ state: 'hidden' });
-        assert.equal(moves, 1);
+        assert.equal(await page.locator('.day-column').count(), 7);
+        await page.getByRole('navigation', { name: 'Días del calendario' }).getByRole('button').first().click();
+        assert.ok(await page.locator('.grid-container').evaluate(el => el.scrollTop > 0));
+        await page.screenshot({ path: `.ui-checks/calendar-empty-${width}.png` });
+        const dayButtons = page.getByRole('navigation', { name: 'Días del calendario' }).getByRole('button');
+        const checkDayAlignment = async (index) => {
+          await page.waitForFunction(index => {
+            const container = document.querySelector('.grid-container');
+            const column = container.querySelectorAll('.day-column')[index];
+            const header = container.querySelector(`[data-day-header="${index}"]`);
+            const edge = container.getBoundingClientRect().left + container.clientLeft + container.querySelector('[data-time-column]').getBoundingClientRect().width;
+            const selected = document.querySelectorAll('nav[aria-label="Días del calendario"] button')[index];
+            return selected.getAttribute('aria-pressed') === 'true' &&
+              Math.abs(column.getBoundingClientRect().left - edge) < 2 &&
+              Math.abs(header.getBoundingClientRect().left - edge) < 2;
+          }, index);
+        };
+        for (const index of [0, 2, 6, 1]) {
+          await dayButtons.nth(index).click();
+          await checkDayAlignment(index);
+        }
+        // A horizontal scroll must update the selected button without a click.
+        await page.locator('.grid-container').evaluate(container => {
+          container.scrollLeft += container.querySelector('.day-column').getBoundingClientRect().width;
+        });
+        await checkDayAlignment(2);
+        await page.screenshot({ path: `.ui-checks/calendar-synced-${width}.png` });
+
         await page.getByRole('button', { name: 'Agendar nueva cita', exact: true }).click();
         await page.getByPlaceholder('Busca o registra un paciente').fill('Paciente');
         await page.getByRole('button', { name: 'Continuar', exact: true }).click();
-        await page.getByRole('heading', { name: 'Nueva cita', exact: true }).waitFor();
-        await page.getByRole('button', { name: 'Cancelar', exact: true }).first().click();
+        await page.getByText('Toca un cuadro en el calendario', { exact: true }).waitFor();
+        await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
       }
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Admin overflow at ${width}`);
       await page.screenshot({ path: `.ui-checks/admin-${width}.png` });
