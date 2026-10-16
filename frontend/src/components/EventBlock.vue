@@ -6,10 +6,10 @@ import { getPatientColor, getEspecialidadColor, pxPerHour, pxPerMinute, blockDur
 const props = defineProps({
   horario: Object,
   startDate: Date,
-  showDeleteId: Number
+  showDeleteId: [Number, String]
 });
 
-const emit = defineEmits(['mousedown', 'cambiar-estado', 'delete-click', 'confirm-delete', 'click']);
+const emit = defineEmits(['mousedown', 'cambiar-estado', 'delete-click', 'confirm-delete', 'click', 'edit']);
 
 const blockStyle = computed(() => {
   const hour = getHours(props.horario.inicio);
@@ -52,7 +52,7 @@ const edad = computed(() => {
        
     <div class="absolute inset-0 p-1 overflow-hidden pointer-events-none rounded flex flex-col justify-between">
       <div>
-        <div class="font-bold pr-4">{{ horario.nombre }}</div>
+        <div class="font-bold pr-14"><span v-if="horario.recurrente" title="Cita semanal">↻ </span>{{ horario.nombre }}</div>
         <div class="opacity-90">{{ format(horario.inicio, 'HH:mm') }} - {{ format(horario.final, 'HH:mm') }}</div>
         <div class="opacity-80 truncate mt-1">
           {{ horario.nombre_tutor ? `Tutor: ${horario.nombre_tutor}` : (horario.f_nacimiento ? `Edad: ${edad} años` : '') }}
@@ -65,6 +65,7 @@ const edad = computed(() => {
       </div>
     </div>
     
+    <button @mousedown.stop @click.stop="emit('edit', horario)" :aria-label="`Editar cita de ${horario.nombre}`" class="absolute top-1 right-6 px-2 z-10 font-bold">⋯</button>
     <button @mousedown.stop @click.stop="emit('delete-click', horario.id_horario)" 
             class="absolute top-1 right-1 text-gray-500 opacity-60 hover:text-red-600 hover:opacity-100 font-bold px-1 z-10 transition-colors">
       ×
@@ -75,13 +76,11 @@ const edad = computed(() => {
          class="absolute inset-0 z-50 bg-white/95 backdrop-blur-sm shadow-xl rounded-md border-2 border-red-300 p-2 flex flex-col items-center justify-center gap-2 animate-fade-in text-center">
       <p class="text-xs font-semibold text-gray-800">¿Eliminar cita?</p>
       <div class="flex gap-2">
-        <button @mousedown.stop="emit('confirm-delete', horario.id_horario)"
-                @touchstart.stop.prevent="emit('confirm-delete', horario.id_horario)"
+        <button @mousedown.stop @click.stop="emit('confirm-delete', horario.id_horario)"
                 class="bg-red-500 text-white px-3 py-1 rounded text-xs font-bold hover:bg-red-600 shadow-sm">
           Sí
         </button>
-        <button @mousedown.stop="emit('delete-click', null)"
-                @touchstart.stop.prevent="emit('delete-click', null)"
+        <button @mousedown.stop @click.stop="emit('delete-click', null)"
                 class="bg-gray-200 text-gray-700 px-3 py-1 rounded text-xs font-bold hover:bg-gray-300 shadow-sm">
           No
         </button>

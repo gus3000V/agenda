@@ -46,9 +46,10 @@ solicitudes públicas por IP por hora. Si hay un proxy, configurar
 `TRUST_PROXY_HOPS` con el número real de saltos de confianza; no activarlo sin
 revisar la topología, porque afecta a la identificación de IP y los límites.
 
-`CRON_SECRET` debe existir y coincidir para ejecutar las tareas automáticas.
-La tarea histórica de mantenimiento envía un PDF y elimina citas antiguas;
-su comportamiento no fue cambiado ni ejecutado durante esta revisión.
+Las tareas cron de duplicación y mantenimiento mensual están retiradas: sus rutas
+devuelven HTTP 410. Ya no se envían informes por correo ni se borran citas antiguas.
+El administrador descarga el PDF del mes desde el calendario. Ver
+[la guía de migración](backend/migrations/README.md) antes de desplegar esta versión.
 
 PostgreSQL verifica el certificado TLS por defecto. `PGSSLMODE=disable` es solo
 para una base local sin TLS. Para un proveedor con CA privada, configurar
@@ -73,7 +74,10 @@ node tests/ui-smoke.cjs
 El último comando requiere Playwright disponible (o `NODE_PATH` apuntando a su
 instalación) y Edge instalado. Sirve ambos `dist` localmente, simula todas las
 respuestas API y comprueba reservas, acceso, cierre de sesión, ausencia de
-desbordamiento horizontal y errores de JavaScript a 360, 390, 768 y 1440 px.
+desbordamiento horizontal y errores de JavaScript a 360, 447, 768 y 1440 px.
 En móvil también verifica mover citas y elegir pacientes. Las capturas quedan
-en `.ui-checks`. Las pruebas HTTP usan una base simulada; falta validar las
-transacciones y la configuración TLS con una base PostgreSQL de pruebas.
+en `.ui-checks`. Las pruebas de seguridad HTTP usan respuestas simuladas; las
+pruebas del almacén ejecutan SQL y la migración en PGlite, una base temporal en
+memoria. No contactan DATABASE_URL. La concurrencia se prueba con una conexión
+serializada; queda verificar bloqueos entre múltiples conexiones y TLS en un
+entorno PostgreSQL de pruebas.

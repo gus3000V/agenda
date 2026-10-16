@@ -37,4 +37,4 @@ function validateRequest(req, res, next) {
   }
   next();
 }
-module.exports = { validateRequest, validDate, clinicNow };
+module.exports = { validateRequest, validDate, validTime, clinicNow };

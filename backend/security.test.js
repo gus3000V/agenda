@@ -1,7 +1,6 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 process.env.ADMIN_PIN = 'test-only-long-admin-password';
-delete process.env.CRON_SECRET;
 const { app, pool } = require('./server');
 // These HTTP tests must never contact the real database.
 pool.query = async () => ({ rows: [], rowCount: 0 });
@@ -19,7 +18,7 @@ const send = (path, method = 'GET', body, token) => fetch(base + path, {
 });
 
 test('all administrative reads and writes require a session', async () => {
-  for (const [method, path] of [['GET','horarios'], ['GET','pacientes'], ['POST','pacientes'], ['POST','horario'], ['POST','paciente-y-cita'], ['PUT','horario/1'], ['PUT','horario/1/estado'], ['DELETE','horario/1']]) {
+  for (const [method, path] of [['GET','horarios'], ['GET','pacientes'], ['POST','pacientes'], ['POST','horario'], ['POST','paciente-y-cita'], ['PUT','horario/1'], ['PUT','horario/1/estado'], ['DELETE','horario/1'], ['POST','series'], ['PUT','series/1/ocurrencias/2099-01-05'], ['POST','horario/1/serie'], ['GET','reporte?mes=2099-01']]) {
     assert.equal((await send(`/api/admin/${path}`, method, method === 'GET' ? undefined : {})).status, 401);
   }
   const legacy = await fetch(base + '/api/admin/horarios', { headers: { 'x-api-key': process.env.ADMIN_PIN } });
@@ -35,9 +34,9 @@ test('login validates credentials and logout revokes the session', async () => {
   assert.equal((await send('/api/auth/logout', 'POST', {}, token)).status, 204);
   assert.equal((await send('/api/admin/horarios', 'GET', undefined, token)).status, 401);
 });
-test('unset cron secret rejects the former Bearer undefined bypass', async () => {
+test('retired cron endpoints cannot mutate data', async () => {
   for (const route of ['duplicar-semana', 'mantenimiento-mensual']) {
-    assert.equal((await send(`/api/cron/${route}`, 'POST', {}, 'undefined')).status, 401);
+    assert.equal((await send(`/api/cron/${route}`, 'POST', {}, 'undefined')).status, 410);
   }
 });
 test('public availability works anonymously without patient information', async () => {

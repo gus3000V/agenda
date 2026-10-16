@@ -4,9 +4,8 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const rateLimit = require('express-rate-limit');
 const PDFDocument = require('pdfkit');
-const nodemailer = require('nodemailer');
-const { installSecurity, cronAuth } = require('./security');
-const { validateRequest, clinicNow } = require('./validation');
+const { installSecurity } = require('./security');
+const { validateRequest, validDate } = require('./validation');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -22,501 +21,96 @@ const pool = new Pool({
   ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: true, ...(process.env.PGSSLROOTCERT_PEM ? { ca: process.env.PGSSLROOTCERT_PEM } : {}) }
 });
 
-// ==========================================
-// MIDDLEWARES DE SEGURIDAD
-// ==========================================
-
-const authMiddleware = installSecurity(app);
+const { createStore } = require('./schedule-store');
+const r = require('./recurrence');
+const store = createStore(pool);
+installSecurity(app);
 app.use('/api/admin', validateRequest);
 app.use('/api/public', validateRequest);
-
-const checkOverlap = async (clientOrPool, inicio, final, excludeId = null) => {
-  let query = `
-    SELECT id_horario FROM horario 
-    WHERE inicio < $2 AND final > $1 
-    AND estado != 'rechazado'
-  `;
-  const params = [inicio, final];
-  if (excludeId) {
-    query += ` AND id_horario != $3`;
-    params.push(excludeId);
-  }
-  const result = await clientOrPool.query(query, params);
-  return result.rows.length > 0;
-};
-
-const withScheduleLock = async (operation) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('LOCK TABLE horario IN SHARE ROW EXCLUSIVE MODE');
-    const result = await operation(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally { client.release(); }
-};
-const conflict = () => Object.assign(new Error('El horario solicitado ya se encuentra ocupado.'), { status: 409 });
-
-// [NUEVO] Middleware Antispam para peticiones de pacientes
+const route = fn => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
 const patientRequestLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hora en milisegundos
-  max: 5, // 5 peticiones máximas por IP en la ventana
-  message: { error: 'Has superado el límite de 5 solicitudes. Intenta de nuevo en una hora.' },
-  standardHeaders: true,
-  legacyHeaders: false,
+  windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Has superado el límite de 5 solicitudes. Intenta de nuevo en una hora.' }
 });
 
+// Retired endpoints are deliberately inert, even if an external scheduler still calls them.
+app.all('/api/cron/:task', (req, res) => res.status(410).json({ error: 'Tarea retirada. Desactiva su programación externa.' }));
 
-// ==========================================
-// RUTAS PRIVADAS (ADMIN) - Protegidas con authMiddleware
-// ==========================================
+app.get('/api/admin/horarios', route(async (req, res) => {
+  const from = req.query.desde || r.clinicTimestamp().slice(0, 10);
+  const to = req.query.hasta || (validDate(from) ? r.addDays(from, 7) : '');
+  res.json(await store.readRange(from, to));
+}));
+app.get('/api/admin/pacientes', route(async (req, res) => res.json(await store.patients())));
+app.post('/api/admin/pacientes', route(async (req, res) => res.status(201).json(await store.createPatient(req.body))));
+app.post('/api/admin/paciente-y-cita', route(async (req, res) => res.status(201).json(await store.createPatientAndAppointment(req.body))));
+app.post('/api/admin/horario', route(async (req, res) => res.status(201).json(await store.createSingle(req.body))));
+app.put('/api/admin/horario/:id', route(async (req, res) => res.json(await store.moveSingle(req.params.id, req.body))));
+app.put('/api/admin/horario/:id/estado', route(async (req, res) => res.json(await store.setStatus(req.params.id, req.body.estado))));
+app.delete('/api/admin/horario/:id', route(async (req, res) => res.json(await store.setStatus(req.params.id, 'rechazado'))));
+app.post('/api/admin/series', route(async (req, res) => res.status(201).json(await store.createSeries(req.body))));
+app.post('/api/admin/horario/:id/serie', route(async (req, res) => res.status(201).json(await store.createSeries(req.body, req.params.id))));
+app.put('/api/admin/series/:id/ocurrencias/:fecha', route(async (req, res) => res.json(await store.changeOccurrence(req.params.id, req.params.fecha, req.body))));
 
-const toLocalDBString = (isoString) => {
-  const d = new Date(isoString);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
-};
-
-app.get('/api/admin/horarios', authMiddleware, async (req, res) => {
-  try {
-    const query = `
-      SELECT h.id_horario, 
-             to_char(h.inicio, 'YYYY-MM-DD"T"HH24:MI:SS') as inicio, 
-             to_char(h.final, 'YYYY-MM-DD"T"HH24:MI:SS') as final, 
-             h.estado, h.especialidad,
-             p.id_paciente, p.nombre, p.f_nacimiento, p.nombre_tutor, p.telefono
-      FROM horario h
-      JOIN paciente p ON h.id_paciente = p.id_paciente
-      ORDER BY h.inicio ASC;
-    `;
-    const { rows } = await pool.query(query);
-    res.status(200).json(rows);
-  } catch (error) {
-    console.error('Error al obtener los horarios:', error);
-    res.status(500).json({ error: 'Error interno del servidor al recuperar los horarios.' });
+app.get('/api/admin/reporte', route(async (req, res) => {
+  const month = req.query.mes;
+  if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month) || !validDate(`${month}-01`)) throw r.fail('Indica un mes válido (AAAA-MM).');
+  const from = `${month}-01`;
+  const next = new Date(`${from}T00:00:00Z`); next.setUTCMonth(next.getUTCMonth() + 1);
+  const rows = await store.readRange(from, next.toISOString().slice(0, 10));
+  const doc = new PDFDocument({ margin: 40 });
+  const data = new Promise((resolve, reject) => {
+    const buffers = []; doc.on('data', chunk => buffers.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(buffers))); doc.on('error', reject);
+  });
+  doc.fontSize(18).text(`Agenda mensual: ${month}`);
+  doc.fontSize(10).text('Horario de Bolivia. Incluye citas aceptadas y pendientes; no acredita asistencia.');
+  doc.moveDown();
+  if (!rows.length) doc.text('No hay citas en este mes.');
+  for (const h of rows) {
+    doc.fontSize(11).text(`${h.inicio.slice(0, 10)} ${h.inicio.slice(11, 16)} - ${h.final.slice(11, 16)}`);
+    doc.text(`${h.nombre} | ${h.especialidad} | ${h.estado}${h.recurrente ? ' | Semanal' : ''}`);
+    doc.moveDown(0.5);
   }
-});
+  doc.end();
+  res.set('Content-Type', 'application/pdf');
+  res.set('Content-Disposition', `attachment; filename="agenda-${month}.pdf"`);
+  res.send(await data);
+}));
 
-app.post('/api/admin/paciente-y-cita', authMiddleware, async (req, res) => {
-  let client;
-  try { client = await pool.connect(); } catch (error) {
-    return res.status(503).json({ error: 'Servicio temporalmente no disponible.' });
-  }
-  try {
-    const { nombre, f_nacimiento, nombre_tutor, telefono, inicio, final, especialidad } = req.body;
-    if (!nombre || !f_nacimiento || !inicio || !final) {
-      return res.status(400).json({ error: 'Faltan campos obligatorios para registrar la cita.' });
+app.get('/api/public/disponibilidad', route(async (req, res) => {
+  const date = req.query.fecha;
+  const now = r.clinicTimestamp();
+  if (date < now.slice(0, 10) || r.weekday(date) === 0) return res.json({ disponibles: [] });
+  const occupied = await store.readRange(date, r.addDays(date, 1));
+  let current = 540;
+  const slots = [];
+  const time = mins => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  const minutes = stamp => Number(stamp.slice(11, 13)) * 60 + Number(stamp.slice(14, 16));
+  for (const h of occupied) {
+    const start = h.inicio.slice(0, 10) < date ? 0 : minutes(h.inicio);
+    const end = h.final.slice(0, 10) > date ? 1440 : minutes(h.final);
+    while (current + 45 <= Math.min(start, 1125)) {
+      slots.push({ hora: time(current), estado: 'libre' }); current += 45;
     }
-
-    await client.query('BEGIN');
-    await client.query('LOCK TABLE horario IN SHARE ROW EXCLUSIVE MODE');
-    const queryPaciente = `
-      INSERT INTO paciente (nombre, f_nacimiento, nombre_tutor, telefono)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id_paciente;
-    `;
-    const resPaciente = await client.query(queryPaciente, [nombre, f_nacimiento, nombre_tutor, telefono]);
-    const nuevoIdPaciente = resPaciente.rows[0].id_paciente;
-
-    const localInicio = toLocalDBString(inicio);
-    const localFinal = toLocalDBString(final);
-
-    if (await checkOverlap(client, localInicio, localFinal)) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'El horario solicitado ya se encuentra ocupado.' });
-    }
-
-    const queryHorario = `
-      INSERT INTO horario (inicio, final, id_paciente, estado, especialidad)
-      VALUES ($1, $2, $3, 'aceptado', $4)
-      RETURNING *;
-    `;
-    const resHorario = await client.query(queryHorario, [localInicio, localFinal, nuevoIdPaciente, especialidad || 'fonoaudiologia']);
-    await client.query('COMMIT');
-
-    res.status(201).json({
-      mensaje: 'Paciente y cita creados exitosamente.',
-      paciente_id: nuevoIdPaciente,
-      horario: resHorario.rows[0]
-    });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error en transacción:', error);
-    res.status(500).json({ error: 'Error interno al procesar registro.' });
-  } finally {
-    client.release();
+    if (h.estado === 'pendiente' && start >= 540 && start + 45 <= 1125) slots.push({ hora: time(start), estado: 'pendiente' });
+    current = Math.max(current, end);
   }
-});
-
-app.put('/api/admin/horario/:id/estado', authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { estado } = req.body;
-    if (!['aceptado', 'rechazado'].includes(estado)) {
-      return res.status(400).json({ error: "Estado inválido." });
-    }
-    const { rows, rowCount } = await withScheduleLock(async (client) => {
-      const current = await client.query('SELECT inicio, final FROM horario WHERE id_horario = $1', [id]);
-      if (estado === 'aceptado' && current.rows.length && await checkOverlap(client, current.rows[0].inicio, current.rows[0].final, id)) throw conflict();
-      return client.query('UPDATE horario SET estado = $1 WHERE id_horario = $2 RETURNING *', [estado, id]);
-    });
-
-    if (rowCount === 0) return res.status(404).json({ error: 'Horario no encontrado.' });
-    res.status(200).json({ mensaje: 'Actualizado', horario: rows[0] });
-  } catch (error) {
-    console.error('Error estado:', error);
-    res.status(error.status || 500).json({ error: error.status === 409 ? error.message : 'Error interno al actualizar estado.' });
-  }
-});
-
-
-app.get('/api/admin/pacientes', authMiddleware, async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT * FROM paciente');
-    res.status(200).json(rows);
-  } catch (error) {
-    res.status(500).json({ error: 'Error interno' });
-  }
-});
-
-app.post('/api/admin/pacientes', authMiddleware, async (req, res) => {
-  try {
-    const { nombre, f_nacimiento, nombre_tutor, telefono } = req.body;
-    const query = `
-      INSERT INTO paciente (nombre, f_nacimiento, nombre_tutor, telefono)
-      VALUES ($1, $2, $3, $4) RETURNING *;
-    `;
-    const { rows } = await pool.query(query, [nombre, f_nacimiento, nombre_tutor, telefono]);
-    res.status(201).json(rows[0]);
-  } catch (error) {
-    res.status(500).json({ error: 'Error interno' });
-  }
-});
-
-app.post('/api/admin/horario', authMiddleware, async (req, res) => {
-  try {
-    const { id_paciente, inicio, especialidad } = req.body;
-    const inicioDate = new Date(inicio);
-    const finalDate = new Date(inicioDate.getTime() + 45 * 60000);
-
-    const localInicio = toLocalDBString(inicioDate);
-    const localFinal = toLocalDBString(finalDate);
-
-    const rows = await withScheduleLock(async (client) => {
-    if (await checkOverlap(client, localInicio, localFinal)) {
-      throw conflict();
-    }
-
-    const query = `
-      INSERT INTO horario (inicio, final, id_paciente, estado, especialidad)
-      VALUES ($1, $2, $3, 'aceptado', $4) RETURNING *;
-    `;
-    const { rows } = await client.query(query, [localInicio, localFinal, id_paciente, especialidad || 'fonoaudiologia']);
-    return rows;
-    });
-    res.status(201).json(rows[0]);
-  } catch (error) {
-    res.status(error.status || 500).json({ error: error.status === 409 ? error.message : 'Error interno' });
-  }
-});
-
-app.put('/api/admin/horario/:id', authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { inicio } = req.body;
-    const inicioDate = new Date(inicio);
-    const finalDate = new Date(inicioDate.getTime() + 45 * 60000);
-
-    const localInicio = toLocalDBString(inicioDate);
-    const localFinal = toLocalDBString(finalDate);
-
-    const rows = await withScheduleLock(async (client) => {
-    if (await checkOverlap(client, localInicio, localFinal, id)) {
-      throw conflict();
-    }
-
-    const query = `UPDATE horario SET inicio = $1, final = $2 WHERE id_horario = $3 RETURNING *;`;
-    const { rows } = await client.query(query, [localInicio, localFinal, id]);
-    return rows;
-    });
-    if (!rows.length) return res.status(404).json({ error: 'Cita no encontrada.' });
-    res.status(200).json(rows[0]);
-  } catch (error) {
-    res.status(error.status || 500).json({ error: error.status === 409 ? error.message : 'Error interno' });
-  }
-});
-
-app.delete('/api/admin/horario/:id', authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    await pool.query('DELETE FROM horario WHERE id_horario = $1', [id]);
-    res.status(200).json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Error interno' });
-  }
-});
-
-app.post('/api/cron/duplicar-semana', cronAuth, async (req, res) => {
-  let client;
-  try { client = await pool.connect(); } catch (error) {
-    return res.status(503).json({ error: 'Servicio temporalmente no disponible.' });
-  }
-  try {
-    // Definimos el rango: la semana que acaba de pasar (Lunes a Domingo)
-    const today = new Date(); // Asumimos que corre Domingo 23:50
-    const endDate = new Date(today);
-    const startDate = new Date(today);
-    startDate.setDate(today.getDate() - 6);
-    startDate.setHours(0, 0, 0, 0);
-
-    const query = `
-      SELECT * FROM horario 
-      WHERE inicio >= $1 AND inicio <= $2 
-      AND especialidad = 'fonoaudiologia' 
-      AND estado != 'rechazado'
-    `;
-    const result = await client.query(query, [startDate, endDate]);
-    
-    await client.query('BEGIN');
-    await client.query('LOCK TABLE horario IN SHARE ROW EXCLUSIVE MODE');
-    
-    for (const row of result.rows) {
-      const start = new Date(row.inicio);
-      const end = new Date(row.final);
-      start.setDate(start.getDate() + 7);
-      end.setDate(end.getDate() + 7);
-      
-      const localInicio = toLocalDBString(start);
-      const localFinal = toLocalDBString(end);
-      
-      if (!(await checkOverlap(client, localInicio, localFinal))) {
-        const insertQ = `
-          INSERT INTO horario (inicio, final, id_paciente, estado, especialidad)
-          VALUES ($1, $2, $3, $4, $5)
-        `;
-        await client.query(insertQ, [localInicio, localFinal, row.id_paciente, row.estado, 'fonoaudiologia']);
-      }
-    }
-    
-    await client.query('COMMIT');
-    res.status(200).json({ mensaje: 'Semana de fonoaudiologia duplicada automaticamente.' });
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error en cron duplicar:', error);
-    res.status(500).json({ error: 'Error interno cron' });
-  } finally {
-    client.release();
-  }
-});
-
-app.post('/api/cron/mantenimiento-mensual', cronAuth, async (req, res) => {
-  try {
-    // 1. Obtener datos antiguos (ej. anteriores a este mes/semana)
-    // Para simplificar, obtenemos todo lo del mes pasado o hasta hoy.
-    const today = new Date();
-    const query = `
-      SELECT h.inicio, h.final, p.nombre, h.especialidad 
-      FROM horario h JOIN paciente p ON h.id_paciente = p.id_paciente
-      WHERE h.inicio < $1 ORDER BY h.inicio ASC
-    `;
-    const result = await pool.query(query, [today]);
-
-    // 2. Generar PDF en memoria
-    const doc = new PDFDocument();
-    let buffers = [];
-    doc.on('data', buffers.push.bind(buffers));
-    
-    doc.fontSize(20).text('Reporte Mensual de Citas', { align: 'center' });
-    doc.moveDown();
-    
-    result.rows.forEach(r => {
-      const fecha = new Date(r.inicio).toLocaleString('es-ES');
-      doc.fontSize(12).text(`- ${fecha} | Paciente: ${r.nombre} | Especialidad: ${r.especialidad}`);
-    });
-    
-    doc.end();
-
-    const pdfData = await new Promise((resolve) => {
-      doc.on('end', () => {
-        resolve(Buffer.concat(buffers));
-      });
-    });
-
-    // 3. Enviar por email
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      }
-    });
-
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.EMAIL_ADMIN,
-      subject: 'Reporte Mensual y Limpieza de Base de Datos',
-      text: 'Adjunto el reporte en PDF de las citas pasadas. La base de datos ha sido limpiada.',
-      attachments: [{
-        filename: 'reporte_citas.pdf',
-        content: pdfData
-      }]
-    });
-
-    // 4. Limpiar DB (eliminar citas anteriores a hace 1 semana para mantener la plantilla)
-    const unaSemanaAtras = new Date(today);
-    unaSemanaAtras.setDate(today.getDate() - 7);
-    await pool.query(`DELETE FROM horario WHERE inicio < $1`, [unaSemanaAtras]);
-
-    res.status(200).json({ mensaje: 'Mantenimiento mensual completado. PDF enviado.' });
-  } catch (error) {
-    console.error('Error en mantenimiento:', error);
-    res.status(500).json({ error: 'Error en mantenimiento' });
-  }
-});
-
-// ==========================================
-// [NUEVO] RUTAS PÚBLICAS (PACIENTES)
-// ==========================================
-
-/**
- * GET /api/public/disponibilidad
- * Calcula los bloques de 45 mins disponibles basados en un horario de 09:00 a 18:00
- */
-app.get('/api/public/disponibilidad', async (req, res) => {
-  try {
-    const { fecha } = req.query; // Formato esperado: YYYY-MM-DD
-    if (!fecha) {
-      return res.status(400).json({ error: 'Falta el parámetro fecha (YYYY-MM-DD)' });
-    }
-
-    const query = `
-      SELECT 
-        EXTRACT(EPOCH FROM (GREATEST(inicio, $1::date) - $1::date))/60 as inicio_min,
-        EXTRACT(EPOCH FROM (LEAST(final, $1::date + '1 day'::interval) - $1::date))/60 as final_min,
-        estado
-      FROM horario
-      WHERE final > $1::date
-        AND inicio < ($1::date + '1 day'::interval)
-        AND estado != 'rechazado'
-      ORDER BY inicio ASC;
-    `;
-    const { rows } = await pool.query(query, [fecha]);
-
-    let currentTime = 9 * 60; // 09:00 = 540 min
-    const finOperacionMin = 18 * 60 + 45; // 18:45 = 1125 min
-    const intervalo = 45;
-    const slots = [];
-
-    const formatTime = (mins) => {
-      const h = Math.floor(mins / 60).toString().padStart(2, '0');
-      const m = (Math.floor(mins) % 60).toString().padStart(2, '0');
-      return `${h}:${m}`;
-    };
-
-    for (const appt of rows) {
-      const inicioMin = parseFloat(appt.inicio_min);
-      const finalMin = parseFloat(appt.final_min);
-
-      // Llenar espacios libres continuos de 45 mins antes de la cita
-      while (currentTime + intervalo <= Math.min(inicioMin, finOperacionMin)) {
-        slots.push({ hora: formatTime(currentTime), estado: 'libre' });
-        currentTime += intervalo;
-      }
-
-      // Si es pendiente, se empuja como bloque en espera
-      if (appt.estado === 'pendiente' && inicioMin >= 540 && inicioMin + intervalo <= finOperacionMin) {
-        slots.push({ hora: formatTime(inicioMin), estado: 'pendiente' });
-      }
-
-      // Avanzamos el reloj al final de esta cita
-      currentTime = Math.max(currentTime, finalMin);
-    }
-
-    // Llenar espacios de 45 mins al final del día
-    while (currentTime + intervalo <= finOperacionMin) {
-      slots.push({ hora: formatTime(currentTime), estado: 'libre' });
-      currentTime += intervalo;
-    }
-
-    const now = clinicNow();
-    const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const available = slots.filter(slot => fecha >= today && new Date(`${fecha}T12:00:00`).getDay() !== 0 && (fecha !== today || slot.hora > `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`));
-    res.status(200).json({ disponibles: available });
-  } catch (error) {
-    console.error('Error al calcular disponibilidad:', error);
-    res.status(500).json({ error: 'Error interno calculando horarios disponibles.' });
-  }
-});
-
-/**
- * POST /api/public/solicitar
- * Recibe formulario público. Usa transacción y confía en el DEFAULT 'pendiente'.
- * Restringido por middleware antispam.
- */
-app.post('/api/public/solicitar', patientRequestLimiter, async (req, res) => {
-  let client;
-  try { client = await pool.connect(); } catch (error) {
-    return res.status(503).json({ error: 'Servicio temporalmente no disponible.' });
-  }
-  try {
-    const { nombre, f_nacimiento, nombre_tutor, telefono, inicio, final } = req.body;
-
-    if (!nombre || !f_nacimiento || !inicio || !final) {
-      return res.status(400).json({ error: 'Faltan campos obligatorios para procesar la solicitud.' });
-    }
-
-    await client.query('BEGIN');
-    await client.query('LOCK TABLE horario IN SHARE ROW EXCLUSIVE MODE');
-
-    const localInicio = toLocalDBString(inicio);
-    const localFinal = toLocalDBString(final);
-
-    if (await checkOverlap(client, localInicio, localFinal)) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'El horario solicitado ya se encuentra ocupado.' });
-    }
-
-    // 1. Insertar paciente
-    const queryPaciente = `
-      INSERT INTO paciente (nombre, f_nacimiento, nombre_tutor, telefono)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id_paciente;
-    `;
-    const resPaciente = await client.query(queryPaciente, [nombre, f_nacimiento, nombre_tutor, telefono]);
-    const idGenerado = resPaciente.rows[0].id_paciente;
-
-    // 2. Insertar horario (OMITIMOS el campo 'estado' para que PostreSQL asigne 'pendiente' DEFAULT)
-    const queryHorario = `
-      INSERT INTO horario (inicio, final, id_paciente, estado)
-      VALUES ($1, $2, $3, 'pendiente');
-    `;
-    await client.query(queryHorario, [localInicio, localFinal, idGenerado]);
-
-    await client.query('COMMIT');
-
-    // Retornamos éxito genérico, sin revelar datos transaccionales por seguridad
-    res.status(201).json({
-      mensaje: 'Su solicitud ha sido enviada con éxito. El consultorio confirmará su cita a la brevedad.'
-    });
-
-  } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error al procesar solicitud pública:', error);
-    res.status(500).json({ error: 'Error interno procesando su solicitud.' });
-  } finally {
-    client.release();
-  }
-});
-
+  while (current + 45 <= 1125) { slots.push({ hora: time(current), estado: 'libre' }); current += 45; }
+  res.json({ disponibles: slots.filter(slot => `${date}T${slot.hora}:00` > now) });
+}));
+app.post('/api/public/solicitar', patientRequestLimiter, route(async (req, res) => {
+  await store.createPatientAndAppointment(req.body, true);
+  res.status(201).json({ mensaje: 'Solicitud enviada. El consultorio confirmará su cita.' });
+}));
 app.use((error, req, res, next) => {
-  console.error('Error de solicitud:', error.message);
-  res.status(error.status || 500).json({ error: error.status === 400 ? 'Solicitud inválida.' : 'Error interno del servidor.' });
+  if (res.headersSent) return next(error);
+  // Never expose SQL, connection strings, or patient information in a response.
+  console.error('Error de solicitud:', error.code || error.status || 'internal');
+  if (['42P01', '42703'].includes(error.code)) return res.status(503).json({ error: 'Falta aplicar la migración de citas recurrentes en el servidor.' });
+  if (['23503', '23514', '23505'].includes(error.code)) return res.status(400).json({ error: 'Datos inválidos o registro duplicado.' });
+  const status = error.status || 500;
+  res.status(status).json({ error: status < 500 ? error.message : 'Servicio temporalmente no disponible.' });
 });
-
-if (require.main === module) app.listen(port, () => {
-  console.log(`Servidor backend corriendo en el puerto ${port}`);
-});
+if (require.main === module) app.listen(port, () => console.log(`Servidor backend corriendo en el puerto ${port}`));
 module.exports = { app, pool };

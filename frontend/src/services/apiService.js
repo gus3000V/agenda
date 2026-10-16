@@ -30,10 +30,26 @@ export async function login(pin) {
 export async function logout() {
   try { await request(`${AUTH_URL}/logout`, 'POST'); } finally { clearSession(); }
 }
-export const getHorarios = () => request(`${BASE_URL}/horarios`);
+export const getHorarios = (desde, hasta) => request(`${BASE_URL}/horarios?${new URLSearchParams({ desde, hasta })}`);
 export const getPacientes = () => request(`${BASE_URL}/pacientes`);
 export const createPaciente = paciente => request(`${BASE_URL}/pacientes`, 'POST', paciente);
-export const createHorario = (id_paciente, inicio, especialidad = 'fonoaudiologia') => request(`${BASE_URL}/horario`, 'POST', { id_paciente, inicio, especialidad });
+export const createHorario = (id_paciente, inicio, especialidad = 'fonoaudiologia', options = {}) =>
+  request(`${BASE_URL}/${options.repetir && especialidad === 'fonoaudiologia' ? 'series' : 'horario'}`, 'POST', { id_paciente, inicio, especialidad, fecha_fin: options.fecha_fin || null });
+export const convertToSeries = (id, fecha_fin) => request(`${BASE_URL}/horario/${id}/serie`, 'POST', { fecha_fin: fecha_fin || null });
+export const changeOccurrence = (seriesId, date, changes) => request(`${BASE_URL}/series/${seriesId}/ocurrencias/${date}`, 'PUT', changes);
+export async function downloadReport(month) {
+  const res = await fetch(`${BASE_URL}/reporte?${new URLSearchParams({ mes: month })}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    if (res.status === 401) { clearSession(); window.dispatchEvent(new Event('session-expired')); }
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || 'No se pudo descargar el reporte.');
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement('a'); link.href = url; link.download = `agenda-${month}.pdf`;
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export const updateHorarioEstado = (id, estado) => request(`${BASE_URL}/horario/${id}/estado`, 'PUT', { estado });
 export const updateHorarioInicio = (id, inicio) => request(`${BASE_URL}/horario/${id}`, 'PUT', { inicio });
 export const deleteHorario = id => request(`${BASE_URL}/horario/${id}`, 'DELETE');

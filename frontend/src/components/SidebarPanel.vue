@@ -15,6 +15,10 @@ const searchName = ref('');
 const isSubmitting = ref(false);
 const isMobileOpen = ref(false);
 const selectedEspecialidad = ref('fonoaudiologia');
+const repetir = ref(false);
+const fechaFin = ref('');
+const recurrenceOptions = () => ({ repetir: repetir.value && selectedEspecialidad.value === 'fonoaudiologia', fecha_fin: fechaFin.value });
+watch(selectedEspecialidad, () => { repetir.value = false; fechaFin.value = ''; });
 
 const newPatientForm = ref({
   f_nacimiento: '',
@@ -52,7 +56,7 @@ const onNombreEnter = () => {
   if (filteredPacientes.value.length > 0) {
     inputNombre.value?.blur();
     isMobileOpen.value = false;
-    emit('start-placement', filteredPacientes.value[0], selectedEspecialidad.value);
+    emit('start-placement', filteredPacientes.value[0], selectedEspecialidad.value, recurrenceOptions());
   } else if (searchName.value.trim().length > 0) {
     step.value = 2;
     nextTick(() => inputFecha.value?.focus());
@@ -118,7 +122,7 @@ const onTelefonoEnter = async () => {
     emit('patient-created', newPatient);
     inputTelefono.value?.blur();
     isMobileOpen.value = false;
-    emit('start-placement', newPatient, selectedEspecialidad.value);
+    emit('start-placement', newPatient, selectedEspecialidad.value, recurrenceOptions());
   } catch (e) {
     console.error(e);
     alert(e.message);
@@ -130,7 +134,7 @@ const onTelefonoEnter = async () => {
 const onSelectPatient = (patient) => {
   if (props.placementMode) return;
   isMobileOpen.value = false;
-  emit('start-placement', patient, selectedEspecialidad.value);
+  emit('start-placement', patient, selectedEspecialidad.value, recurrenceOptions());
 };
 
 const cancelPlacement = () => {
@@ -177,6 +181,12 @@ const cancelPlacement = () => {
             <option value="fonoaudiologia">Fonoaudiologia</option>
             <option value="cosmetologia">Cosmetologia</option>
           </select>
+          <div v-if="selectedEspecialidad === 'fonoaudiologia'" class="rounded-lg bg-blue-50 p-3 mb-3 space-y-2">
+            <label class="flex items-center gap-2 text-sm font-medium"><input type="checkbox" v-model="repetir" /> Repetir cada semana</label>
+            <label v-if="repetir" class="block text-sm">Última fecha (opcional)
+              <input type="date" v-model="fechaFin" class="mt-1 w-full p-2 border rounded bg-white" />
+            </label>
+          </div>
         </div>
 
         <div>

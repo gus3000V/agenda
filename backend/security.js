@@ -41,11 +41,4 @@ function installSecurity(app) {
   return auth;
 }
 
-const cronAuth = (req, res, next) => {
-  if (!process.env.CRON_SECRET || !matches(req.headers.authorization, `Bearer ${process.env.CRON_SECRET}`)) {
-    return res.status(401).json({ error: 'No autorizado' });
-  }
-  next();
-};
-
-module.exports = { installSecurity, cronAuth };
+module.exports = { installSecurity };

@@ -1,11 +1,12 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted, toRef, nextTick } from 'vue';
 import { format, differenceInDays, startOfDay, set, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import EventBlock from './EventBlock.vue';
+import AppointmentEditor from './AppointmentEditor.vue';
 import { useDragAndDrop } from '../composables/useDragAndDrop';
 import { pxPerHour, pxPerMinute, blockDuration, getEspecialidadColor } from '../utils/constants';
-import { updateHorarioEstado, updateHorarioInicio, deleteHorario, createHorario } from '../services/apiService';
+import { updateHorarioEstado, updateHorarioInicio, deleteHorario, createHorario, downloadReport } from '../services/apiService';
 
 const props = defineProps({
   horarios: Array,
@@ -13,13 +14,31 @@ const props = defineProps({
   startDate: Date,
   placementMode: Boolean,
   placementPatient: Object,
-  placementEspecialidad: String
+  placementEspecialidad: String,
+  placementOptions: Object
 });
 
-const emit = defineEmits(['logout', 'refresh-data', 'cancel-placement']);
+const emit = defineEmits(['logout', 'refresh-data', 'cancel-placement', 'change-week', 'editing']);
 
 const scrollContainer = ref(null);
 const showDeleteId = ref(null);
+const editorAppointment = ref(null);
+const editorAction = ref('move');
+const editorDate = ref(null);
+const reportMonth = ref(format(new Date(), 'yyyy-MM'));
+const reportBusy = ref(false);
+const reportError = ref('');
+const openEditor = (h, action = 'move', proposed = null) => {
+  editorAction.value = action; editorDate.value = proposed; editorAppointment.value = h;
+  showDeleteId.value = null; emit('editing', true);
+};
+const closeEditor = () => { editorAppointment.value = null; emit('editing', false); };
+const exportMonth = async () => {
+  if (reportBusy.value) return;
+  reportBusy.value = true; reportError.value = '';
+  try { await downloadReport(reportMonth.value); } catch (e) { reportError.value = e.message; }
+  finally { reportBusy.value = false; }
+};
 
 const {
   draggingHorario,
@@ -32,7 +51,7 @@ const {
   cleanUpDrag,
   onDayMouseMove,
   onDayMouseLeave
-} = useDragAndDrop(ref(props.days), scrollContainer);
+} = useDragAndDrop(toRef(props, 'days'), scrollContainer);
 
 const isTouchModeActive = () => {
   return window.matchMedia('(max-width: 1023px)').matches || navigator.maxTouchPoints > 0;
@@ -69,6 +88,7 @@ watch(() => props.placementMode, (newVal) => {
 });
 
 const handleBlockClick = (event, horario) => {
+  if (horario.recurrente && isTouchModeActive() && !props.placementMode) { openEditor(horario); return; }
   if (isTouchModeActive() && !props.placementMode) {
     if (mobileAction.value.type !== null) return;
     
@@ -111,19 +131,19 @@ const confirmMobileAction = async () => {
       emit('refresh-data');
     } catch (e) {
       console.error(e);
-      alert('Error al mover cita');
+      alert(e.message);
     }
   } else if (mobileAction.value.type === 'PLACE') {
     const pId = mobileAction.value.patient.id_paciente;
     mobileAction.value.type = null;
     dragGhost.value.visible = false;
     try {
-      await createHorario(pId, isoStr, mobileAction.value.especialidad);
+      await createHorario(pId, isoStr, mobileAction.value.especialidad, props.placementOptions);
       emit('refresh-data');
       emit('cancel-placement');
     } catch (e) {
       console.error(e);
-      alert('Error al agendar cita');
+      alert(e.message);
     }
   }
 };
@@ -141,6 +161,10 @@ const handleMouseUp = async () => {
     const newDate = getNewDateFromGhost();
     const horarioId = draggingHorario.value.id_horario;
     
+    if (draggingHorario.value.recurrente) {
+      const h = draggingHorario.value;
+      cleanUpDrag(); openEditor(h, 'move', newDate); return;
+    }
     // Optimistic UI update
     draggingHorario.value.inicio = newDate;
     
@@ -150,7 +174,7 @@ const handleMouseUp = async () => {
       emit('refresh-data');
     } catch (e) {
       console.error(e);
-      alert('Error al guardar el horario');
+      alert(e.message);
       emit('refresh-data');
     }
   } else {
@@ -208,12 +232,12 @@ const handleGridClick = async (event, dayIndex) => {
   const patientId = props.placementPatient.id_paciente;
   cleanUpDrag();
   try {
-    await createHorario(patientId, toLocalISOString(newDate), props.placementEspecialidad);
+    await createHorario(patientId, toLocalISOString(newDate), props.placementEspecialidad, props.placementOptions);
     emit('refresh-data');
     emit('cancel-placement');
   } catch (e) {
     console.error(e);
-    alert('Error al agendar cita');
+    alert(e.message);
   }
 };
 
@@ -223,18 +247,20 @@ const handleCambiarEstado = async (horario, nuevoEstado) => {
     horario.estado = nuevoEstado; // Optimistic update
   } catch (error) {
     console.error('Error:', error);
-    alert('Error al actualizar estado');
+    alert(error.message);
   }
 };
 
 const handleConfirmDelete = async (id) => {
+  const h = props.horarios.find(h => h.id_horario === id);
+  if (h?.recurrente) { openEditor(h, 'cancel'); return; }
   try {
     await deleteHorario(id);
     showDeleteId.value = null;
     emit('refresh-data');
   } catch (e) {
     console.error(e);
-    alert('Error al eliminar reserva');
+    alert(e.message);
   }
 };
 
@@ -267,6 +293,7 @@ const syncVisibleDay = () => {
 const alignAfterResize = () => {
   if (window.matchMedia('(max-width: 1023px)').matches) selectDay(selectedDay.value);
 };
+watch(() => props.days, async () => { await nextTick(); alignAfterResize(); });
 onMounted(() => {
   window.addEventListener('resize', alignAfterResize);
   if (scrollContainer.value) scrollContainer.value.scrollTop = 9 * pxPerHour;
@@ -294,6 +321,19 @@ onUnmounted(() => {
       <button @click="emit('logout')" class="text-sm text-red-600 hover:text-red-800 font-medium">Cerrar Sesión</button>
     </header>
 
+    <div class="flex flex-wrap items-center gap-2 border-b bg-white px-3 py-2 shrink-0">
+      <button :disabled="placementMode || !!editorAppointment" @click="emit('change-week', -1)" aria-label="Semana anterior" class="border rounded-lg px-3 py-2">←</button>
+      <span class="text-sm flex-1">{{ format(days[0], 'dd/MM') }} – {{ format(days[6], 'dd/MM/yyyy') }}</span>
+      <button :disabled="placementMode || !!editorAppointment" @click="emit('change-week', 1)" aria-label="Semana siguiente" class="border rounded-lg px-3 py-2">→</button>
+      <details class="relative">
+        <summary class="cursor-pointer border rounded-lg px-3 py-2 text-sm">Reporte</summary>
+        <div class="absolute right-0 top-full z-50 mt-2 bg-white rounded-xl shadow-xl border p-4 w-64 space-y-3">
+          <label class="block text-sm">Mes del reporte<input type="month" v-model="reportMonth" class="w-full mt-1 border rounded p-2" /></label>
+          <button :disabled="reportBusy || !reportMonth" @click="exportMonth" class="w-full bg-blue-600 text-white rounded-lg p-2">{{ reportBusy ? 'Preparando…' : 'Descargar PDF' }}</button>
+          <p v-if="reportError" role="alert" class="text-sm text-red-700">{{ reportError }}</p>
+        </div>
+      </details>
+    </div>
     <nav class="lg:hidden flex overflow-x-auto border-b bg-white shrink-0 p-1 gap-1" aria-label="Días del calendario">
       <button v-for="(day, index) in days" :key="index" @click="selectDay(index)" :aria-pressed="selectedDay === index" :aria-label="format(day, 'EEEE dd/MM', { locale: es })" class="flex-1 min-w-11 rounded-lg py-2 text-xs" :class="selectedDay === index ? 'bg-blue-600 text-white' : 'text-gray-600'">
         <span class="block capitalize">{{ format(day, 'EEE', { locale: es }) }}</span>
@@ -342,6 +382,7 @@ onUnmounted(() => {
                   :start-date="startDate"
                   :show-delete-id="showDeleteId"
                   :class="{'opacity-50': mobileAction.type === 'MOVE' && mobileAction.step === 2 && mobileAction.horario?.id_horario === horario.id_horario}"
+                  @edit="openEditor"
                   @mousedown="handleMouseDown"
                   @click="handleBlockClick($event, horario)"
                   @cambiar-estado="handleCambiarEstado"
@@ -376,6 +417,7 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <AppointmentEditor :appointment="editorAppointment" :initial-action="editorAction" :proposed-date="editorDate" @close="closeEditor" @saved="emit('refresh-data')" />
     <!-- Mobile Unified Action Panel -->
     <div v-if="mobileAction.type" class="fixed bottom-4 right-4 left-4 lg:left-auto lg:w-[440px] bg-white shadow-2xl rounded-xl border border-gray-200 p-4 z-50 animate-fade-in-up">
       <div class="flex flex-wrap gap-3 items-center justify-between">

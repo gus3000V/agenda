@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { startOfWeek, addDays, parseISO } from 'date-fns';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { startOfWeek, addDays, parseISO, format } from 'date-fns';
 import { getHorarios, getPacientes, login, logout, hasSession, clearSession } from './services/apiService';
 import LoginPanel from './components/LoginPanel.vue';
 import SidebarPanel from './components/SidebarPanel.vue';
@@ -18,6 +18,8 @@ const days = computed(() => Array.from({ length: 7 }).map((_, i) => addDays(star
 const placementMode = ref(false);
 const placementPatient = ref(null);
 const placementEspecialidad = ref('fonoaudiologia');
+const placementOptions = ref({});
+const editing = ref(false);
 
 let pollingInterval = null;
 
@@ -26,7 +28,7 @@ const startPolling = () => {
   pollingInterval = setInterval(() => {
     // Evitar interrumpir al usuario si está arrastrando o agendando
     const isAnyDragging = horarios.value.some(h => h.isDragging);
-    if (!placementMode.value && !isAnyDragging) {
+    if (!editing.value && !placementMode.value && !isAnyDragging) {
       fetchData();
     }
   }, 5000); // 5 segundos
@@ -66,14 +68,15 @@ onUnmounted(() => {
 });
 
 const fetchData = async () => {
+  const requestedWeek = startDate.value.getTime();
   try {
-    const dataHorarios = await getHorarios();
+    const dataHorarios = await getHorarios(format(startDate.value, 'yyyy-MM-dd'), format(addDays(startDate.value, 7), 'yyyy-MM-dd'));
     if (!dataHorarios) {
       alert('PIN Inválido');
       handleLogout();
       return;
     }
-    if (!isAuthenticated.value) return;
+    if (!isAuthenticated.value || requestedWeek !== startDate.value.getTime()) return;
     dataError.value = '';
     horarios.value = dataHorarios.map(h => ({
       ...h,
@@ -88,7 +91,10 @@ const fetchData = async () => {
   }
 };
 
-const startPlacement = (patient, especialidad = 'fonoaudiologia') => {
+watch(startDate, () => { if (isAuthenticated.value) fetchData(); });
+const changeWeek = offset => { if (!placementMode.value && !editing.value) startDate.value = addDays(startDate.value, offset * 7); };
+const startPlacement = (patient, especialidad = 'fonoaudiologia', options = {}) => {
+  placementOptions.value = options;
   placementPatient.value = patient;
   placementEspecialidad.value = especialidad;
   placementMode.value = true;
@@ -121,6 +127,9 @@ const cancelPlacement = () => {
       :placement-mode="placementMode"
       :placement-patient="placementPatient"
       :placement-especialidad="placementEspecialidad"
+      :placement-options="placementOptions"
+      @change-week="changeWeek"
+      @editing="editing = $event"
       @logout="handleLogout"
       @refresh-data="fetchData"
       @cancel-placement="cancelPlacement"

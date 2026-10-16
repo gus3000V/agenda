@@ -28,6 +28,7 @@ async function serve(directory) {
       page.on('pageerror', error => errors.push(error.message));
       const today = new Date().toLocaleDateString('en-CA');
       let bookings = 0, moves = 0, loginAttempts = 0;
+      const recurrenceChanges = [];
       await page.route('**/*', async route => {
         const request = route.request();
         const url = new URL(request.url());
@@ -39,9 +40,9 @@ async function serve(directory) {
           }
           else if (url.pathname.endsWith('/disponibilidad')) data = { disponibles: [{ hora: '09:00', estado: 'libre' }, { hora: '09:45', estado: 'pendiente' }, { hora: '10:30', estado: 'libre' }] };
           else if (url.pathname.endsWith('/solicitar')) { bookings++; data = { mensaje: 'Solicitud recibida' }; }
-          else if (url.pathname.endsWith('/horarios')) data = [{ id_horario: 1, nombre: 'Paciente de prueba', inicio: `${today}T09:00:00`, final: `${today}T09:45:00`, estado: 'pendiente', especialidad: 'fonoaudiologia' }];
+          else if (url.pathname.endsWith('/horarios')) data = [{ id_horario: 's1@' + today, id_serie: 1, fecha_original: today, recurrente: true, nombre: 'Paciente de prueba', inicio: `${today}T09:00:00`, final: `${today}T09:45:00`, estado: 'aceptado', especialidad: 'fonoaudiologia' }];
           else if (url.pathname.endsWith('/pacientes')) data = [{ id_paciente: 1, nombre: 'Paciente de prueba' }];
-          else if (request.method() === 'PUT') { moves++; data = { success: true }; }
+          else if (request.method() === 'PUT') { moves++; recurrenceChanges.push(request.postDataJSON()); data = { success: true }; }
           return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
         }
         if (url.hostname !== '127.0.0.1') return route.abort();
@@ -99,6 +100,21 @@ async function serve(directory) {
         await page.getByText('Toca un cuadro en el calendario', { exact: true }).waitFor();
         await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
       }
+      if (width < 1024) {
+        const index = (new Date().getDay() + 6) % 7;
+        await page.getByRole('navigation', { name: 'Días del calendario' }).getByRole('button').nth(index).click();
+      }
+      await page.getByRole('button', { name: 'Editar cita de Paciente de prueba', exact: true }).click();
+      const editor = page.getByRole('dialog', { name: 'Editar cita', exact: true });
+      await editor.getByRole('combobox').nth(0).selectOption('cancel');
+      await editor.getByRole('combobox').nth(1).selectOption('following');
+      await editor.getByRole('checkbox').check();
+      await page.screenshot({ path: `.ui-checks/recurrence-editor-${width}.png` });
+      await editor.getByRole('button', { name: 'Confirmar cancelación' }).click();
+      await editor.waitFor({ state: 'hidden' });
+      assert.equal(recurrenceChanges.at(-1).scope, 'following');
+      assert.equal(recurrenceChanges.at(-1).action, 'cancel');
+      assert.equal(recurrenceChanges.at(-1).confirm_exceptions, true);
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Admin overflow at ${width}`);
       await page.screenshot({ path: `.ui-checks/admin-${width}.png` });
       assert.deepEqual(errors, []);
